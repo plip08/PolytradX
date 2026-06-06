@@ -1,0 +1,46 @@
+{
+  "name": "polymarket-quant-bot",
+  "version": "0.1.0",
+  "description": "Quantitative trading bot for Polymarket on Polygon with multi-strategy execution.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "start:bot": "node dist/index.js",
+    "start:api": "node dist/api/server.js",
+    "dev": "ts-node-esm src/index.ts",
+    "dev:bot": "ts-node-esm src/index.ts",
+    "dev:api": "ts-node-esm src/api/server.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev --name init",
+    "prisma:studio": "prisma studio",
+    "docker:build": "docker build -t polymarket-quant-bot .",
+    "docker:up": "docker-compose up -d --build",
+    "docker:down": "docker-compose down",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "ci": "npm ci && npm run build && npm test"
+  },
+  "dependencies": {
+    "@polymarket/clob-client": "^1.0.0",
+    "@prisma/client": "^4.16.2",
+    "@redis/client": "^1.0.0",
+    "dotenv": "^16.0.0",
+    "ethers": "^6.0.0",
+    "fastify": "^4.29.1",
+    "pg": "^8.10.0",
+    "prom-client": "^15.1.3",
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/pg": "^8.6.0",
+    "@types/ws": "^8.5.0",
+    "prisma": "^4.16.2",
+    "ts-node": "^10.0.0",
+    "typescript": "^5.0.0",
+    "supertest": "^6.3.0",
+    "vitest": "^1.0.0"
+  }
+}

@@ -1,0 +1,91 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String       @id @default(uuid())
+  email               String       @unique
+  passwordHash        String
+  role                String       @default("admin")
+  is2faEnabled        Boolean      @default(true)
+  totpSecretEncrypted String
+  failedLoginCount    Int          @default(0)
+  lockedUntil         DateTime?    
+  lastLoginAt         DateTime?    
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  metadata            Json?        
+  auditLogs           AuditLog[]   
+  trades              TradesHistory[]
+}
+
+model TradesHistory {
+  id             String    @id @default(uuid())
+  marketId       String
+  assetId        String?
+  outcome        String
+  strategy       String
+  side           String
+  walletAddress  String
+  txHash         String    @unique
+  status         String    @default("PENDING")
+  executedAt     DateTime  @default(now())
+  priceUsd       Decimal   @db.Decimal(30, 12)
+  quantity       Decimal   @db.Decimal(30, 12)
+  notionalUsd    Decimal   @db.Decimal(30, 12)
+  slippagePct    Decimal   @db.Decimal(12, 8)
+  gasUsed        BigInt?
+  gasFeeUsd      Decimal   @db.Decimal(30, 12) @default("0")
+  networkFeeGwei Decimal?  @db.Decimal(20, 9)
+  botSnapshotId  String?
+  notes          String?
+  metadata       Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  executedBy     User?     @relation(fields: [executedById], references: [id])
+  executedById   String?
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  user       User?    @relation(fields: [userId], references: [id])
+  userId     String?
+  eventType  String
+  action     String
+  resource   String?
+  resourceId String?
+  ipAddress  String?
+  userAgent  String?
+  source     String   @default("api")
+  details    Json
+  createdAt  DateTime @default(now())
+}
+
+model StrategyConfig {
+  id              String   @id @default(uuid())
+  strategyName    String   @unique
+  enabled         Boolean  @default(false)
+  allocationPct   Decimal  @db.Decimal(5, 4) @default("0")
+  maxPositionUsd  Decimal  @db.Decimal(30, 12) @default("0")
+  thresholdValue  Decimal? @db.Decimal(30, 12)
+  cooldownSeconds Int      @default(0)
+  maxSlippagePct  Decimal  @db.Decimal(10, 6) @default("0.006")
+  parameters      Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model MarketRiskEvent {
+  id         String   @id @default(uuid())
+  marketId   String
+  signalType String
+  severity   String
+  source     String   @default("market-risk-monitor")
+  details    Json
+  createdAt  DateTime @default(now())
+}
