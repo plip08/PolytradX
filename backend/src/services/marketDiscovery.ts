@@ -133,6 +133,7 @@ export class MarketDiscovery {
   });
 
   private scanTimer: ReturnType<typeof setInterval> | null = null;
+  private nearExpiryTimer: ReturnType<typeof setInterval> | null = null;
   private handlers: DiscoveryHandlers = {};
   private lastMarketCount = 0;
 
@@ -153,10 +154,15 @@ export class MarketDiscovery {
     emitLog('INFO', '[MarketDiscovery] Starting — scanning Gamma API');
     void this.scan();
     this.scanTimer = setInterval(() => void this.scan(), this.config.scanIntervalMs);
+
+    // Near-expiry scanner runs every 60s — critical for ResolutionSniping
+    void this.scanNearExpiry();
+    this.nearExpiryTimer = setInterval(() => void this.scanNearExpiry(), 60_000);
   }
 
   stop(): void {
     if (this.scanTimer) clearInterval(this.scanTimer);
+    if (this.nearExpiryTimer) clearInterval(this.nearExpiryTimer);
     MarketDiscovery.instance = null;
   }
 
@@ -176,6 +182,56 @@ export class MarketDiscovery {
     } catch (err) {
       logger.error('[MarketDiscovery] Scan failed', { err });
     }
+  }
+
+  // ─── Near-expiry scanner (every 60s) ────────────────────────────────────────
+
+  private async scanNearExpiry(): Promise<void> {
+    try {
+      const markets = await this.fetchNearExpiryMarkets();
+      if (markets.length > 0 && this.handlers.onNearExpiryMarkets) {
+        this.handlers.onNearExpiryMarkets(markets);
+        emitLog('INFO', `[MarketDiscovery] Near-expiry scan: ${markets.length} markets → ResolutionSniping`);
+      }
+    } catch (err) {
+      logger.error('[MarketDiscovery] Near-expiry scan failed', { err });
+    }
+  }
+
+  private async fetchNearExpiryMarkets(): Promise<MarketInfo[]> {
+    const now = Date.now();
+    const results: MarketInfo[] = [];
+    // Fetch markets ending in the next 6 hours — prime window for resolution sniping
+    const endBefore = new Date(now + 6 * 60 * 60 * 1000).toISOString();
+
+    let offset = 0;
+    while (true) {
+      const res = await this.gammaHttp.get<GammaMarket[]>('/markets', {
+        params: {
+          active: true,
+          closed: false,
+          end_date_max: endBefore,
+          limit: 100,
+          offset,
+        },
+      });
+
+      const batch = res.data;
+      if (!batch || batch.length === 0) break;
+
+      for (const g of batch) {
+        const expiry = new Date(g.endDate).getTime();
+        if (expiry <= now) continue; // already past expiry
+        const market = parseMarket(g);
+        if (market) results.push(market);
+      }
+
+      if (batch.length < 100) break;
+      offset += 100;
+      if (results.length >= 50) break;
+    }
+
+    return results.sort((a, b) => (a.expirationTimestamp) - (b.expirationTimestamp));
   }
 
   private async fetchMarkets(): Promise<MarketInfo[]> {
@@ -255,17 +311,10 @@ export class MarketDiscovery {
 
   private routeMarkets(markets: MarketInfo[], eventGroups: MarketInfo[][]): void {
     const cap = this.config.maxMarketsPerStrategy;
-    const now = Date.now();
-    const nearExpiryThreshold = 48 * 60 * 60 * 1000; // 48h
 
-    const crypto   = markets.filter((m) => m.category === 'crypto').slice(0, cap);
-    const sports   = markets.filter((m) => m.category === 'sports').slice(0, cap);
+    const crypto    = markets.filter((m) => m.category === 'crypto').slice(0, cap);
+    const sports    = markets.filter((m) => m.category === 'sports').slice(0, cap);
     const allLiquid = markets.slice(0, cap);
-
-    // Near-expiry: any category, expires within 48h (but > minExpiry already filtered out by fetchMarkets logic above, so re-fetch with looser filter)
-    const nearExpiry = markets.filter(
-      (m) => m.expirationTimestamp - now < nearExpiryThreshold,
-    ).slice(0, 20);
 
     if (crypto.length > 0) {
       this.handlers.onCryptoMarkets?.(crypto);
@@ -274,7 +323,7 @@ export class MarketDiscovery {
 
     if (sports.length > 0) {
       this.handlers.onSportsMarkets?.(sports);
-      emitLog('INFO', `[MarketDiscovery] → LatencyArb+ResolutionSnipe: ${sports.length} sports markets`);
+      emitLog('INFO', `[MarketDiscovery] → LatencyArb: ${sports.length} sports markets`);
     }
 
     if (allLiquid.length > 0) {
@@ -285,11 +334,7 @@ export class MarketDiscovery {
       this.handlers.onEventGroups?.(eventGroups);
       emitLog('INFO', `[MarketDiscovery] → NegativeRisk: ${eventGroups.length} event groups`);
     }
-
-    if (nearExpiry.length > 0) {
-      this.handlers.onNearExpiryMarkets?.(nearExpiry);
-      emitLog('INFO', `[MarketDiscovery] → ResolutionSniping: ${nearExpiry.length} near-expiry markets`);
-    }
+    // Near-expiry markets are fed by the dedicated scanNearExpiry() (every 60s)
   }
 
   getLastMarketCount(): number {

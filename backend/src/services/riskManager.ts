@@ -46,7 +46,7 @@ export class RiskManager {
     totalExposure: 0,
   };
 
-  private readonly MAX_DAILY_LOSS_USD = 500;
+  private readonly MAX_DAILY_LOSS_USD = parseFloat(process.env['MAX_DAILY_LOSS_USD'] ?? '500');
   private readonly MAX_POSITIONS = 20;
 
   // Not readonly — can be updated at runtime when settings change

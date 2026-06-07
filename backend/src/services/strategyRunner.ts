@@ -90,13 +90,13 @@ export class StrategyRunner {
     const provider = this.wallet.provider;
     if (!provider) throw new Error('Wallet has no provider');
 
-    // Strategy 1 — Atomic Arb (markets fed dynamically by MarketDiscovery)
+    // Strategy 1 — Atomic Arb
     this.strategies.set(
       'ATOMIC_ARB',
       new AtomicArbStrategy(
         {
-          targetMargin: 0.005,   // 0.5% min net profit per pair
-          maxPositionUsdc: 1000,
+          targetMargin: 0.008,     // 0.8% min — covers gas + slippage on Polygon
+          maxPositionUsdc: 55,     // max $55 per trade (fits in $60 allocation)
           collateralToken: process.env['USDC_ADDRESS'] ?? '',
         },
         this.configMap['ATOMIC_ARB'],
@@ -106,7 +106,7 @@ export class StrategyRunner {
       ),
     );
 
-    // Strategy 2 — Market Maker
+    // Strategy 2 — Market Maker (disabled — needs large capital)
     this.strategies.set(
       'MARKET_MAKER',
       new MarketMakerStrategy(
@@ -114,10 +114,10 @@ export class StrategyRunner {
           marketId: process.env['MM_MARKET_ID'] ?? '',
           tokenId: process.env['MM_TOKEN_ID'] ?? '',
           targetSpreadBps: 50,
-          orderSizeUsdc: 100,
-          maxInventoryTokens: 5000,
-          rebalanceThresholdPct: 0.003,
-          imbalanceAdjustmentFactor: 0.5,
+          orderSizeUsdc: 50,
+          maxInventoryTokens: 1000,
+          rebalanceThresholdPct: 0.005,
+          imbalanceAdjustmentFactor: 0.3,
         },
         this.configMap['MARKET_MAKER'],
         this.clob,
@@ -125,14 +125,15 @@ export class StrategyRunner {
       ),
     );
 
-    // Strategy 3 — Latency Arb
+    // Strategy 3 — Latency Arb (disabled — needs paid sports feed)
+    const sportsFeedUrl = process.env['SPORTS_FEED_WS_URL'] ?? '';
     this.strategies.set(
       'LATENCY_ARB',
       new LatencyArbStrategy(
         {
-          feedWsUrl: process.env['SPORTS_FEED_WS_URL'] ?? 'wss://api.simulated-sports.io/feed',
+          feedWsUrl: sportsFeedUrl,
           feedApiKey: process.env['SPORTS_FEED_API_KEY'],
-          maxSweepUsdc: 500,
+          maxSweepUsdc: 40,
           stalePriceThreshold: 0.05,
           eventCooldownMs: 30_000,
         },
@@ -146,7 +147,10 @@ export class StrategyRunner {
     this.strategies.set(
       'LOGIC_ARB',
       new LogicArbStrategy(
-        { scanIntervalMs: 5_000, maxPairsToTrack: 50 },
+        {
+          scanIntervalMs: 60_000,  // 1 min — less aggressive, small capital
+          maxPairsToTrack: 20,     // 20 quality pairs > 50 random ones
+        },
         this.configMap['LOGIC_ARB'],
         this.clob,
         this.risk,
@@ -159,8 +163,8 @@ export class StrategyRunner {
       new NegativeRiskStrategy(
         {
           marketGroups: [],
-          minExcessThreshold: 0.03,
-          scanIntervalMs: 10_000,
+          minExcessThreshold: 0.02, // trigger at 2% excess (was 3%)
+          scanIntervalMs: 30_000,   // every 30s
         },
         this.configMap['NEGATIVE_RISK'],
         this.clob,
@@ -174,8 +178,8 @@ export class StrategyRunner {
       new ResolutionSnipingStrategy(
         {
           watchedMarkets: [],
-          minSnipeMargin: 0.01,
-          maxSnipeSizeUsdc: 500,
+          minSnipeMargin: 0.015,   // snipe asks below $0.985 (covers gas)
+          maxSnipeSizeUsdc: 50,    // max $50 per snipe
         },
         this.configMap['RESOLUTION_SNIPE'],
         this.clob,
@@ -186,15 +190,15 @@ export class StrategyRunner {
       ),
     );
 
-    // Strategy 8 — AI Agent
+    // Strategy 8 — AI Agent (disabled — too many API calls for small capital)
     this.strategies.set(
       'AI_AGENT',
       new IaAgentStrategy(
         {
           aiProvider: 'ANTHROPIC',
           confidenceThreshold: parseFloat(process.env['AI_CONFIDENCE_THRESHOLD'] ?? '0.90'),
-          maxCallsPerMinute: 10,
-          newsPollingIntervalMs: 3_000,
+          maxCallsPerMinute: 5,
+          newsPollingIntervalMs: 60_000,
           watchedMarkets: [],
         },
         this.configMap['AI_AGENT'],

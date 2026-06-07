@@ -45,75 +45,86 @@ for (const key of REQUIRED_ENV) {
 
 // ─── Default config for all strategies ───────────────────────────────────────
 
+// Capital plan for 150€ total:
+//   AtomicArb       $60  — risk-free if fast enough, small but guaranteed
+//   ResolutionSnipe $55  — highest certainty, snipe stale asks on resolved markets
+//   NegativeRisk    $45  — mathematical certainty on multi-outcome events
+//   LogicArb        $20  — conservative, only real logical pairs
+//   MarketMaker     OFF  — needs $5k+ to be competitive
+//   LatencyArb      OFF  — needs paid sports feed
+//   AI_AGENT        OFF  — useful for filtering, no direct capital
+
+const dryRun = process.env['DRY_RUN'] === 'true';
+
 const DEFAULT_CONFIG: ConfigMap = {
   ATOMIC_ARB: {
     id: 'ATOMIC_ARB',
-    enabled: false,
-    maxSlippagePct: 0.01,
-    minProfitUsd: 0.5,
-    capitalAllocationUsd: 2000,
+    enabled: true,
+    maxSlippagePct: 0.005,   // tight — arb only works if price is right
+    minProfitUsd: 0.15,      // ~$0.15 min to cover gas on Polygon
+    capitalAllocationUsd: 60,
     gasStrategy: 'FAST',
-    dryRun: process.env['DRY_RUN'] === 'true',
+    dryRun,
     customParams: {},
   },
   MARKET_MAKER: {
     id: 'MARKET_MAKER',
-    enabled: false,
+    enabled: false,           // needs $5k+ capital to compete
     maxSlippagePct: 0.005,
     minProfitUsd: 0.1,
-    capitalAllocationUsd: 3000,
+    capitalAllocationUsd: 0,
     gasStrategy: 'STANDARD',
-    dryRun: process.env['DRY_RUN'] === 'true',
+    dryRun,
     customParams: {},
   },
   LATENCY_ARB: {
     id: 'LATENCY_ARB',
-    enabled: false,
+    enabled: false,           // needs paid sports feed (Betfair/Pinnacle)
     maxSlippagePct: 0.03,
-    minProfitUsd: 1.0,
-    capitalAllocationUsd: 1000,
+    minProfitUsd: 0.5,
+    capitalAllocationUsd: 0,
     gasStrategy: 'FRONTRUN',
-    dryRun: process.env['DRY_RUN'] === 'true',
+    dryRun,
     customParams: {},
   },
   LOGIC_ARB: {
     id: 'LOGIC_ARB',
-    enabled: false,
+    enabled: true,
     maxSlippagePct: 0.02,
-    minProfitUsd: 0.5,
-    capitalAllocationUsd: 2000,
+    minProfitUsd: 0.20,
+    capitalAllocationUsd: 20,
     gasStrategy: 'FAST',
-    dryRun: process.env['DRY_RUN'] === 'true',
+    dryRun,
     customParams: {},
   },
   NEGATIVE_RISK: {
     id: 'NEGATIVE_RISK',
-    enabled: false,
+    enabled: true,
     maxSlippagePct: 0.02,
-    minProfitUsd: 1.0,
-    capitalAllocationUsd: 2000,
+    minProfitUsd: 0.20,
+    capitalAllocationUsd: 45,
     gasStrategy: 'FAST',
-    dryRun: process.env['DRY_RUN'] === 'true',
+    dryRun,
     customParams: {},
   },
   RESOLUTION_SNIPE: {
     id: 'RESOLUTION_SNIPE',
-    enabled: false,
+    enabled: true,
     maxSlippagePct: 0.005,
-    minProfitUsd: 0.5,
-    capitalAllocationUsd: 1000,
-    gasStrategy: 'FRONTRUN',
-    dryRun: process.env['DRY_RUN'] === 'true',
+    minProfitUsd: 0.10,      // low threshold — even $0.10 guaranteed profit is worth it
+    capitalAllocationUsd: 55,
+    gasStrategy: 'FRONTRUN', // speed is everything here
+    dryRun,
     customParams: {},
   },
   AI_AGENT: {
     id: 'AI_AGENT',
-    enabled: false,
+    enabled: false,           // too expensive in API calls for small capital
     maxSlippagePct: 0.02,
     minProfitUsd: 1.0,
-    capitalAllocationUsd: 500,
+    capitalAllocationUsd: 0,
     gasStrategy: 'FAST',
-    dryRun: process.env['DRY_RUN'] === 'true',
+    dryRun,
     customParams: {},
   },
 };
