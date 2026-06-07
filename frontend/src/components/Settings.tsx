@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { clsx } from 'clsx';
 import { useBotStore } from '../store/botStore';
+import { botApi } from '../hooks/useWebSocket';
 
 const API_URL = process.env['NEXT_PUBLIC_API_URL'] ?? 'http://localhost:3001';
 const API_KEY = process.env['NEXT_PUBLIC_API_KEY'] ?? '';
@@ -11,7 +12,7 @@ const headers = { 'Content-Type': 'application/json', 'x-api-key': API_KEY };
 
 type MaskedKey = { masked: string; configured: boolean };
 type ApiKeys = Record<'ANTHROPIC_API_KEY' | 'OPENAI_API_KEY' | 'GROK_API_KEY' | 'GOOGLE_API_KEY', MaskedKey>;
-type BotConfig = { DRY_RUN: string; MAX_GLOBAL_CAPITAL_USD: string; AI_CONFIDENCE_THRESHOLD: string; AI_PROVIDER: string };
+type BotConfig = { DRY_RUN: string; MAX_GLOBAL_CAPITAL_USD: string; MAX_DAILY_LOSS_USD: string; AI_CONFIDENCE_THRESHOLD: string; AI_PROVIDER: string };
 
 // ─── Key Input Row ─────────────────────────────────────────────────────────────
 
@@ -255,6 +256,179 @@ function BotConfigSection({
   );
 }
 
+// ─── Kill Switch Config ────────────────────────────────────────────────────────
+
+type LossMode = 'FIXED' | 'PERCENT';
+
+function KillSwitchConfig({
+  config,
+  onSave,
+}: {
+  config: BotConfig;
+  onSave: (updates: Partial<BotConfig>) => Promise<void>;
+}): React.ReactElement {
+  const walletBalance = useBotStore((s) => s.walletBalanceUsdc);
+  const capitalUsd    = parseFloat(config.MAX_GLOBAL_CAPITAL_USD);
+  const referenceAmt  = walletBalance > 0 ? walletBalance : capitalUsd;
+
+  const [mode, setMode]     = useState<LossMode>('FIXED');
+  const [fixed, setFixed]   = useState(parseFloat(config.MAX_DAILY_LOSS_USD || '25'));
+  const [pct, setPct]       = useState(10);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved]   = useState(false);
+
+  const isCircuitOpen = useBotStore((s) => s.isKillSwitchActive);
+
+  useEffect(() => {
+    setFixed(parseFloat(config.MAX_DAILY_LOSS_USD || '25'));
+  }, [config.MAX_DAILY_LOSS_USD]);
+
+  const effectiveLimit = mode === 'FIXED' ? fixed : Math.round(referenceAmt * pct / 100 * 100) / 100;
+
+  const handleSave = async (): Promise<void> => {
+    setSaving(true);
+    try {
+      await onSave({ MAX_DAILY_LOSS_USD: effectiveLimit.toFixed(2) });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err) {
+      useBotStore.getState().addToast({
+        type: 'error',
+        title: 'Failed to save kill switch config',
+        description: err instanceof Error ? err.message : 'Could not reach the backend',
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleResetCircuitBreaker = async (): Promise<void> => {
+    try {
+      await botApi.resetCircuitBreaker();
+      useBotStore.getState().addToast({ type: 'success', title: 'Circuit breaker reset', description: 'Trading resumed' });
+    } catch (err) {
+      useBotStore.getState().addToast({
+        type: 'error',
+        title: 'Reset failed',
+        description: err instanceof Error ? err.message : 'Could not reach the backend',
+      });
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Mode selector */}
+      <div className="flex gap-2">
+        {(['FIXED', 'PERCENT'] as LossMode[]).map((m) => (
+          <button
+            key={m}
+            onClick={() => setMode(m)}
+            className={clsx(
+              'flex-1 py-1.5 text-xs rounded-lg border font-medium transition-all',
+              mode === m
+                ? 'bg-red-500/20 border-red-500 text-red-300'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500',
+            )}
+          >
+            {m === 'FIXED' ? 'Montant fixe ($)' : '% du capital'}
+          </button>
+        ))}
+      </div>
+
+      {/* FIXED mode */}
+      {mode === 'FIXED' && (
+        <div className="space-y-2">
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-400">Perte max journalière</span>
+            <span className="text-red-300 font-mono font-medium">${fixed.toFixed(2)}</span>
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={Math.max(200, Math.round(referenceAmt * 0.5))}
+            step={1}
+            value={fixed}
+            onChange={(e) => setFixed(parseFloat(e.target.value))}
+            className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+            style={{
+              background: `linear-gradient(to right, #ef4444 ${(fixed / Math.max(200, Math.round(referenceAmt * 0.5))) * 100}%, #334155 ${(fixed / Math.max(200, Math.round(referenceAmt * 0.5))) * 100}%)`,
+            }}
+          />
+          <div className="flex justify-between text-[10px] text-slate-600">
+            <span>$1</span>
+            <span>${Math.max(200, Math.round(referenceAmt * 0.5))}</span>
+          </div>
+        </div>
+      )}
+
+      {/* PERCENT mode */}
+      {mode === 'PERCENT' && (
+        <div className="space-y-2">
+          <div className="flex justify-between text-xs">
+            <span className="text-slate-400">% de perte journalière max</span>
+            <span className="text-red-300 font-mono font-medium">{pct}% = ${effectiveLimit.toFixed(2)}</span>
+          </div>
+          <input
+            type="range"
+            min={1}
+            max={50}
+            step={1}
+            value={pct}
+            onChange={(e) => setPct(parseFloat(e.target.value))}
+            className="w-full h-1.5 rounded-full appearance-none cursor-pointer"
+            style={{
+              background: `linear-gradient(to right, #ef4444 ${((pct - 1) / 49) * 100}%, #334155 ${((pct - 1) / 49) * 100}%)`,
+            }}
+          />
+          <div className="flex justify-between text-[10px] text-slate-600">
+            <span>1%</span>
+            <span>50%</span>
+          </div>
+          {referenceAmt > 0 && (
+            <p className="text-[10px] text-slate-600">
+              Référence : ${referenceAmt.toFixed(2)} USDC en portefeuille
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Current active limit */}
+      <div className="flex items-center justify-between bg-slate-900/60 rounded-lg px-3 py-2 border border-slate-800">
+        <span className="text-slate-500 text-xs">Limite active</span>
+        <span className="text-red-400 text-xs font-mono font-semibold">
+          ${parseFloat(config.MAX_DAILY_LOSS_USD || '25').toFixed(2)} / jour
+        </span>
+      </div>
+
+      <button
+        onClick={handleSave}
+        disabled={saving}
+        className={clsx(
+          'w-full py-2 rounded-lg text-sm font-semibold transition-all',
+          saved
+            ? 'bg-green-600/20 border border-green-600 text-green-400'
+            : 'bg-red-600/20 border border-red-500 text-red-300 hover:bg-red-600/30 disabled:opacity-40',
+        )}
+      >
+        {saving ? 'Saving…' : saved ? '✓ Saved' : 'Appliquer la limite'}
+      </button>
+
+      {/* Circuit breaker reset */}
+      {isCircuitOpen && (
+        <div className="mt-3 p-3 bg-red-500/10 border border-red-500/50 rounded-lg space-y-2">
+          <p className="text-red-400 text-xs font-semibold">Circuit breaker ouvert — trading bloqué</p>
+          <button
+            onClick={handleResetCircuitBreaker}
+            className="w-full py-1.5 text-xs rounded-lg bg-red-600/30 border border-red-500 text-red-300 hover:bg-red-600/50 transition-all font-semibold"
+          >
+            Réinitialiser le circuit breaker
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Connection Info ───────────────────────────────────────────────────────────
 
 function ConnectionInfo(): React.ReactElement {
@@ -385,6 +559,17 @@ export function Settings(): React.ReactElement {
       <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
         <h3 className="text-slate-300 text-sm font-semibold mb-4">Bot Configuration</h3>
         {botConfig && <BotConfigSection config={botConfig} onSave={saveBotConfig} />}
+      </div>
+
+      {/* Kill Switch / Circuit Breaker */}
+      <div className="bg-slate-800/50 border border-red-900/40 rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-slate-300 text-sm font-semibold">Kill Switch — Circuit Breaker</h3>
+          <span className="text-[10px] text-red-400 bg-red-500/10 border border-red-500/30 px-2 py-0.5 rounded">
+            Coupe tout trading si dépassé
+          </span>
+        </div>
+        {botConfig && <KillSwitchConfig config={botConfig} onSave={saveBotConfig} />}
       </div>
 
       {/* Connection */}

@@ -218,6 +218,11 @@ async function main(): Promise<void> {
     res.json({ success: true, message: 'Kill switch deactivated' });
   });
 
+  app.post('/circuit-breaker/reset', (_req, res) => {
+    risk.resetCircuitBreaker();
+    res.json({ success: true, message: 'Circuit breaker reset' });
+  });
+
   app.post('/strategy/:id/start', (req, res) => {
     try {
       runner.startStrategy(req.params['id'] as StrategyId);
@@ -281,7 +286,7 @@ async function main(): Promise<void> {
 
   const ALLOWED_SETTINGS = [
     'ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'GROK_API_KEY', 'GOOGLE_API_KEY',
-    'DRY_RUN', 'MAX_GLOBAL_CAPITAL_USD', 'AI_CONFIDENCE_THRESHOLD', 'AI_PROVIDER',
+    'DRY_RUN', 'MAX_GLOBAL_CAPITAL_USD', 'MAX_DAILY_LOSS_USD', 'AI_CONFIDENCE_THRESHOLD', 'AI_PROVIDER',
   ] as const;
   type SettingKey = typeof ALLOWED_SETTINGS[number];
 
@@ -322,6 +327,7 @@ async function main(): Promise<void> {
     const botConfig = {
       DRY_RUN:                  process.env['DRY_RUN'] ?? 'true',
       MAX_GLOBAL_CAPITAL_USD:   process.env['MAX_GLOBAL_CAPITAL_USD'] ?? '10000',
+      MAX_DAILY_LOSS_USD:       process.env['MAX_DAILY_LOSS_USD'] ?? '25',
       AI_CONFIDENCE_THRESHOLD:  process.env['AI_CONFIDENCE_THRESHOLD'] ?? '0.90',
       AI_PROVIDER:              process.env['AI_PROVIDER'] ?? 'ANTHROPIC',
     };
@@ -354,9 +360,12 @@ async function main(): Promise<void> {
         aiStrategy?.reloadApiKeys();
       }
 
-      // Update risk capital limit if it changed
+      // Update risk limits if they changed
       if ('MAX_GLOBAL_CAPITAL_USD' in updates) {
         risk.updateCapitalLimit();
+      }
+      if ('MAX_DAILY_LOSS_USD' in updates) {
+        risk.updateDailyLossLimit();
       }
 
       res.json({ success: true, updated: Object.keys(updates) });

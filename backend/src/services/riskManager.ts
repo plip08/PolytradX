@@ -46,16 +46,26 @@ export class RiskManager {
     totalExposure: 0,
   };
 
-  private readonly MAX_DAILY_LOSS_USD = parseFloat(process.env['MAX_DAILY_LOSS_USD'] ?? '500');
   private readonly MAX_POSITIONS = 20;
 
-  // Not readonly — can be updated at runtime when settings change
+  // Both can be updated at runtime when settings change
   private maxTotalExposureUsd = parseFloat(process.env['MAX_GLOBAL_CAPITAL_USD'] ?? '10000');
+  private maxDailyLossUsd     = parseFloat(process.env['MAX_DAILY_LOSS_USD'] ?? '500');
 
   /** Call after updating MAX_GLOBAL_CAPITAL_USD in process.env */
   updateCapitalLimit(): void {
     this.maxTotalExposureUsd = parseFloat(process.env['MAX_GLOBAL_CAPITAL_USD'] ?? '10000');
     emitLog('INFO', `[RiskManager] Capital limit updated to $${this.maxTotalExposureUsd}`);
+  }
+
+  /** Call after updating MAX_DAILY_LOSS_USD in process.env */
+  updateDailyLossLimit(): void {
+    this.maxDailyLossUsd = parseFloat(process.env['MAX_DAILY_LOSS_USD'] ?? '500');
+    emitLog('INFO', `[RiskManager] Daily loss limit updated to $${this.maxDailyLossUsd}`);
+  }
+
+  getDailyLossLimit(): number {
+    return this.maxDailyLossUsd;
   }
 
   private constructor() {
@@ -213,15 +223,15 @@ export class RiskManager {
   }
 
   private checkCircuitBreaker(): void {
-    if (this.state.dailyPnL < -this.MAX_DAILY_LOSS_USD && !this.state.isCircuitBreakerOpen) {
+    if (this.state.dailyPnL < -this.maxDailyLossUsd && !this.state.isCircuitBreakerOpen) {
       this.state.isCircuitBreakerOpen = true;
       emitLog(
         'ERROR',
-        `[RiskManager] Circuit breaker OPEN — daily loss $${Math.abs(this.state.dailyPnL).toFixed(2)} exceeds limit $${this.MAX_DAILY_LOSS_USD} — MANUAL RESET REQUIRED`,
+        `[RiskManager] Circuit breaker OPEN — daily loss $${Math.abs(this.state.dailyPnL).toFixed(2)} exceeds limit $${this.maxDailyLossUsd} — MANUAL RESET REQUIRED`,
       );
       BotWebSocketServer.getInstance().broadcast('CIRCUIT_BREAKER_OPEN', {
         dailyLoss: this.state.dailyPnL,
-        limit: this.MAX_DAILY_LOSS_USD,
+        limit: this.maxDailyLossUsd,
         timestamp: Date.now(),
       });
     }

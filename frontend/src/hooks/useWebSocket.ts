@@ -201,6 +201,7 @@ async function apiCall<T>(
 export const botApi = {
   activateKillSwitch: () => apiCall<void>('POST', '/kill-switch'),
   deactivateKillSwitch: () => apiCall<void>('DELETE', '/kill-switch'),
+  resetCircuitBreaker: () => apiCall<void>('POST', '/circuit-breaker/reset'),
   startStrategy: (id: string) => apiCall<void>('POST', `/strategy/${id}/start`),
   stopStrategy: (id: string) => apiCall<void>('POST', `/strategy/${id}/stop`),
   updateConfig: (id: string, config: unknown) =>
