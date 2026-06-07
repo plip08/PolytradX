@@ -117,18 +117,13 @@ function MetricRow({
 }
 
 const STRATEGY_METRIC_LABELS: Record<StrategyId, Record<string, string>> = {
-  ATOMIC_ARB: { mergeCount: 'Merges', totalPnL: 'P&L ($)' },
-  MARKET_MAKER: { earnedSpread: 'Spread earned ($)', spreadBps: 'Spread (bps)', inventory: 'Inventory' },
-  LATENCY_ARB: { totalSweeps: 'Sweeps', totalPnL: 'P&L ($)' },
-  LOGIC_ARB: { trackedPairs: 'Pairs', totalArbs: 'Arbs', totalPnL: 'P&L ($)' },
-  NEGATIVE_RISK: { trackedGroups: 'Groups', maxCurrentExcess: 'Max Excess', totalPnL: 'P&L ($)' },
-  RESOLUTION_SNIPE: { watchedMarkets: 'Watched', totalSnipes: 'Snipes', totalPnL: 'P&L ($)' },
-  AI_AGENT: {
-    totalAnalyses: 'Analyses',
-    totalSignals: 'Signals',
-    latestConfidence: 'Conf.',
-    aiProvider: 'AI',
-  },
+  ATOMIC_ARB:       { marketsWatched: 'Marchés surveillés', mergeCount: 'Merges', totalPnL: 'P&L ($)' },
+  MARKET_MAKER:     { earnedSpread: 'Spread ($)', inventory: 'Inventory' },
+  LATENCY_ARB:      { totalSweeps: 'Sweeps', totalPnL: 'P&L ($)' },
+  LOGIC_ARB:        { trackedPairs: 'Paires', totalArbs: 'Arbs', totalPnL: 'P&L ($)' },
+  NEGATIVE_RISK:    { trackedGroups: 'Groupes', maxCurrentExcess: 'Excès max', totalArbs: 'Arbs', totalPnL: 'P&L ($)' },
+  RESOLUTION_SNIPE: { watchedMarkets: 'Marchés < 6h', totalSnipes: 'Snipes', totalPnL: 'P&L ($)' },
+  AI_AGENT:         { totalAnalyses: 'Analyses', totalSignals: 'Signaux', aiProvider: 'AI' },
 };
 
 // ─── Strategy Card ────────────────────────────────────────────────────────────
@@ -193,21 +188,35 @@ function StrategyCard({ id }: { id: StrategyId }): React.ReactElement {
 
 // ─── Bot Matrix ───────────────────────────────────────────────────────────────
 
-const STRATEGY_IDS: StrategyId[] = [
-  'ATOMIC_ARB',
-  'MARKET_MAKER',
-  'LATENCY_ARB',
-  'LOGIC_ARB',
-  'NEGATIVE_RISK',
-  'RESOLUTION_SNIPE',
-  'AI_AGENT',
-];
+const ACTIVE_STRATEGIES: StrategyId[]   = ['ATOMIC_ARB', 'NEGATIVE_RISK', 'RESOLUTION_SNIPE', 'LOGIC_ARB'];
+const INACTIVE_STRATEGIES: StrategyId[] = ['MARKET_MAKER', 'LATENCY_ARB', 'AI_AGENT'];
+
+const INACTIVE_REASON: Record<string, string> = {
+  MARKET_MAKER: 'Nécessite $5k+ de capital',
+  LATENCY_ARB:  'Nécessite un feed sportif (Betfair)',
+  AI_AGENT:     'Trop coûteux en API calls à ce stade',
+};
+
+function DisabledCard({ id }: { id: StrategyId }): React.ReactElement {
+  return (
+    <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 flex flex-col gap-2 opacity-50">
+      <div className="flex items-center gap-2">
+        <span className="text-xl grayscale" role="img">{STRATEGY_ICONS[id]}</span>
+        <div>
+          <h3 className="text-slate-400 text-sm font-semibold">{STRATEGY_LABELS[id]}</h3>
+          <span className="text-[10px] text-slate-600 font-medium uppercase tracking-wider">Désactivée</span>
+        </div>
+      </div>
+      <p className="text-slate-600 text-xs">{INACTIVE_REASON[id]}</p>
+    </div>
+  );
+}
 
 export function BotMatrix(): React.ReactElement {
   const isKillSwitch = useBotStore((s) => s.isKillSwitchActive);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-white">Strategy Control Matrix</h2>
         {isKillSwitch && (
@@ -217,10 +226,28 @@ export function BotMatrix(): React.ReactElement {
         )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-        {STRATEGY_IDS.map((id) => (
-          <StrategyCard key={id} id={id} />
-        ))}
+      {/* Active strategies */}
+      <div>
+        <p className="text-xs text-slate-500 uppercase tracking-wider mb-3 font-semibold">
+          Actives — capital total $180
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+          {ACTIVE_STRATEGIES.map((id) => (
+            <StrategyCard key={id} id={id} />
+          ))}
+        </div>
+      </div>
+
+      {/* Disabled strategies */}
+      <div>
+        <p className="text-xs text-slate-600 uppercase tracking-wider mb-3 font-semibold">
+          Désactivées (infrastructure manquante)
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {INACTIVE_STRATEGIES.map((id) => (
+            <DisabledCard key={id} id={id} />
+          ))}
+        </div>
       </div>
     </div>
   );
