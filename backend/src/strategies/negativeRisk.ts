@@ -167,7 +167,8 @@ export class NegativeRiskStrategy {
     const trades: NegativeRiskAllocation['tradesRequired'] = overvalued.map((o) => {
       const overvaluationShare = (o.yesPrice - fairPrice) / totalOvervaluation;
       const capitalAllocated = totalCapital * overvaluationShare;
-      const noPrice = 1 - o.yesPrice; // approx NO price
+      // Use the actual market NO price (bestAsk of NO token = 1 - bestBid of YES token)
+      const noPrice = o.noPrice > 0 ? o.noPrice : 1 - o.yesPrice;
       const tokenSize = capitalAllocated / noPrice;
 
       return {
@@ -194,14 +195,16 @@ export class NegativeRiskStrategy {
   }
 
   private async execute(allocation: NegativeRiskAllocation): Promise<void> {
+    if (this.config.dryRun) {
+      emitLog('INFO', `[NegativeRisk] DRY RUN — ${allocation.tradesRequired.length} NO buys | est.profit=$${allocation.expectedProfitUsd.toFixed(2)}`, undefined, this.strategyId);
+      return;
+    }
+
     this.status = 'EXECUTING';
     this.broadcastStatus();
 
     const riskCheck = this.risk.checkPreTrade(
-      this.strategyId,
-      this.config,
-      allocation.totalCapitalRequired,
-      0.02,
+      this.strategyId, this.config, allocation.totalCapitalRequired, 0.02,
     );
 
     if (!riskCheck.approved) {
@@ -212,23 +215,34 @@ export class NegativeRiskStrategy {
     }
 
     try {
-      // Execute all NO buys in parallel
       const orderPromises = allocation.tradesRequired.map((trade) =>
         this.clob.placeOrder({
           marketId: trade.marketId,
           tokenId: trade.tokenId,
-          side: 'BUY', // buying NO token
+          side: 'BUY',
           type: 'LIMIT',
-          price: trade.price * 1.01, // slight tolerance
+          price: trade.price * 1.01,
           size: trade.size,
-        }),
+        }).then((r) => ({ trade, resp: r, ok: true as const }))
+          .catch((e) => ({ trade, error: String(e), ok: false as const })),
       );
 
-      const results = await Promise.allSettled(orderPromises);
-      const successful = results.filter((r) => r.status === 'fulfilled');
+      const results = await Promise.all(orderPromises);
+      const successful = results.filter((r) => r.ok);
+      const failed     = results.filter((r) => !r.ok);
 
-      this.totalArbs++;
-      this.totalPnL += allocation.expectedProfitUsd;
+      if (successful.length < allocation.tradesRequired.length) {
+        emitLog('WARN', `[NegativeRisk] Partial fill: ${successful.length}/${allocation.tradesRequired.length} legs filled — arb is not complete`, undefined, this.strategyId);
+        // Release exposure for the legs that did not fill
+        const unfilledCapital = failed.reduce((acc, r) => acc + r.trade.price * r.trade.size, 0);
+        this.risk.releaseExposure(this.strategyId, unfilledCapital);
+        if (successful.length === 0) return;
+      }
+
+      if (successful.length === allocation.tradesRequired.length) {
+        this.totalArbs++;
+        // P&L is realized at market resolution, not now
+      }
 
       const execution: TradeExecution = {
         id: uuidv4(),
@@ -238,9 +252,9 @@ export class NegativeRiskStrategy {
         side: 'BUY',
         price: allocation.totalCapitalRequired / allocation.tradesRequired.reduce((a, t) => a + t.size, 0),
         size: allocation.tradesRequired.reduce((a, t) => a + t.size, 0),
-        pnl: allocation.expectedProfitUsd,
+        pnl: 0, // realized at resolution
         timestamp: Date.now(),
-        status: 'SUCCESS',
+        status: 'PENDING',
       };
 
       this.risk.recordTrade(execution);
@@ -253,6 +267,7 @@ export class NegativeRiskStrategy {
         this.strategyId,
       );
     } catch (err) {
+      this.risk.releaseExposure(this.strategyId, allocation.totalCapitalRequired);
       emitLog('ERROR', `[NegativeRisk] Execution failed: ${String(err)}`, undefined, this.strategyId);
     } finally {
       this.status = 'SCANNING';

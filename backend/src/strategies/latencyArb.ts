@@ -54,6 +54,8 @@ export class LatencyArbStrategy {
   private readonly lastSweepTime = new Map<string, number>(); // marketId → timestamp
   private totalSweeps = 0;
   private totalPnL = 0;
+  private wsReconnectDelay = 1_000;
+  private readonly WS_MAX_RECONNECT_DELAY = 30_000;
 
   constructor(
     private readonly params: LatencyArbParams,
@@ -109,8 +111,8 @@ export class LatencyArbStrategy {
     this.feedWs = new WebSocket(this.params.feedWsUrl, { headers });
 
     this.feedWs.on('open', () => {
+      this.wsReconnectDelay = 1_000; // reset backoff on successful connection
       emitLog('INFO', '[LatencyArb] Sports feed connected', undefined, this.strategyId);
-      // Subscribe to all registered event IDs
       const eventIds = [...this.eventMappings.keys()];
       this.feedWs?.send(JSON.stringify({ action: 'subscribe', eventIds }));
     });
@@ -125,12 +127,13 @@ export class LatencyArbStrategy {
     });
 
     this.feedWs.on('close', () => {
-      emitLog('WARN', '[LatencyArb] Feed disconnected — reconnecting in 1s', undefined, this.strategyId);
+      emitLog('WARN', `[LatencyArb] Feed disconnected — reconnecting in ${this.wsReconnectDelay / 1000}s`, undefined, this.strategyId);
       setTimeout(() => {
         if (this.status === 'SCANNING' || this.status === 'EXECUTING') {
           this.connectFeed();
         }
-      }, 1000);
+      }, this.wsReconnectDelay);
+      this.wsReconnectDelay = Math.min(this.wsReconnectDelay * 2, this.WS_MAX_RECONNECT_DELAY);
     });
 
     this.feedWs.on('error', (err) => {

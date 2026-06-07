@@ -82,11 +82,14 @@ const ORDER_EIP712_TYPES: Record<string, TypedDataField[]> = {
   ],
 } as const;
 
+const CTF_EXCHANGE_ADDRESS = process.env['CTF_EXCHANGE_ADDRESS'];
+if (!CTF_EXCHANGE_ADDRESS) throw new Error('CTF_EXCHANGE_ADDRESS is not set in environment');
+
 export const CLOB_EXCHANGE_DOMAIN: TypedDataDomain = {
   name: 'Polymarket CTF Exchange',
   version: '1',
   chainId: 137,
-  verifyingContract: process.env['CTF_EXCHANGE_ADDRESS'] ?? '',
+  verifyingContract: CTF_EXCHANGE_ADDRESS,
 } as const;
 
 // ─── Provider Manager ─────────────────────────────────────────────────────────

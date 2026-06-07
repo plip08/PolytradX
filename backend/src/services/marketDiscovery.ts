@@ -108,6 +108,7 @@ function parseMarket(g: GammaMarket): MarketInfo | null {
     resolved: g.closed,
     category: detectCategory(g),
     tags: [],
+    volume: parseFloat(String(g.volume ?? '0')),
   };
 }
 
@@ -216,10 +217,8 @@ export class MarketDiscovery {
       if (results.length >= 500) break;
     }
 
-    // Sort by volume desc, take top N per strategy
-    return results.sort((a, b) =>
-      (b.tags?.length ?? 0) - (a.tags?.length ?? 0)
-    );
+    // Sort by volume desc (higher volume = more liquid = better for arb)
+    return results.sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0));
   }
 
   private async fetchEventGroups(): Promise<MarketInfo[][]> {

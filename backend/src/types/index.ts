@@ -235,6 +235,7 @@ export interface MarketInfo {
   resolvedOutcome?: Outcome;
   category: string;
   tags: string[];
+  volume?: number;              // lifetime USDC volume (used for sorting)
 }
 
 // ─── Logic Arb Types ──────────────────────────────────────────────────────────

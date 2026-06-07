@@ -132,7 +132,8 @@ export class RiskManager {
   recordTrade(execution: TradeExecution): void {
     const tradeValueUsd = execution.price * execution.size;
 
-    if (execution.status === 'SUCCESS' || execution.status === 'PENDING') {
+    // Only open positions increment exposure — CLOSED/CANCELLED trades do not
+    if (execution.status === 'PENDING') {
       const stratId = execution.strategyId;
       this.state.strategyExposure[stratId] =
         (this.state.strategyExposure[stratId] ?? 0) + tradeValueUsd;
@@ -140,7 +141,8 @@ export class RiskManager {
       this.state.positionCount++;
     }
 
-    if (execution.pnl !== undefined) {
+    // Record realized P&L only (not unrealized estimates)
+    if (execution.pnl !== undefined && execution.status !== 'PENDING') {
       this.state.cumulativePnL += execution.pnl;
       this.state.dailyPnL += execution.pnl;
       this.checkCircuitBreaker();
@@ -200,24 +202,39 @@ export class RiskManager {
     return this.state.killSwitchActive;
   }
 
+  /** Must be called explicitly by operator after reviewing losses — never auto-resets */
+  resetCircuitBreaker(): void {
+    if (!this.state.isCircuitBreakerOpen) return;
+    this.state.isCircuitBreakerOpen = false;
+    this.state.dailyPnL = 0;
+    this.state.dailyResetTimestamp = Date.now();
+    emitLog('WARN', '[RiskManager] Circuit breaker manually reset by operator — trading resumed');
+    BotWebSocketServer.getInstance().broadcast('CIRCUIT_BREAKER_RESET', { timestamp: Date.now() });
+  }
+
   private checkCircuitBreaker(): void {
     if (this.state.dailyPnL < -this.MAX_DAILY_LOSS_USD && !this.state.isCircuitBreakerOpen) {
       this.state.isCircuitBreakerOpen = true;
       emitLog(
         'ERROR',
-        `Circuit breaker OPEN — daily loss $${Math.abs(this.state.dailyPnL).toFixed(2)} exceeds limit $${this.MAX_DAILY_LOSS_USD}`,
+        `[RiskManager] Circuit breaker OPEN — daily loss $${Math.abs(this.state.dailyPnL).toFixed(2)} exceeds limit $${this.MAX_DAILY_LOSS_USD} — MANUAL RESET REQUIRED`,
       );
+      BotWebSocketServer.getInstance().broadcast('CIRCUIT_BREAKER_OPEN', {
+        dailyLoss: this.state.dailyPnL,
+        limit: this.MAX_DAILY_LOSS_USD,
+        timestamp: Date.now(),
+      });
     }
   }
 
   private checkDailyReset(): void {
     const now = new Date();
     const reset = new Date(this.state.dailyResetTimestamp);
-    if (now.getUTCDate() !== reset.getUTCDate()) {
+    if (now.getUTCDate() !== reset.getUTCDate() && !this.state.isCircuitBreakerOpen) {
+      // Only auto-reset daily P&L counter — never auto-reset a tripped circuit breaker
       this.state.dailyPnL = 0;
       this.state.dailyResetTimestamp = Date.now();
-      this.state.isCircuitBreakerOpen = false;
-      logger.info('[RiskManager] Daily P&L reset and circuit breaker cleared');
+      logger.info('[RiskManager] Daily P&L counter reset (circuit breaker unchanged)');
     }
   }
 

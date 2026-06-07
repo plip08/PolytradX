@@ -150,16 +150,12 @@ export class MarketMakerStrategy {
 
       const orderSize = this.params.orderSizeUsdc / midPrice;
 
-      // Risk check for bid side
-      const bidRisk = this.risk.checkPreTrade(
-        this.strategyId,
-        this.config,
-        this.params.orderSizeUsdc,
-        0,
-      );
+      // Risk check for both sides combined
+      const totalExposure = this.params.orderSizeUsdc * 2;
+      const bidRisk = this.risk.checkPreTrade(this.strategyId, this.config, totalExposure, 0);
 
       if (!bidRisk.approved) {
-        emitLog('WARN', `[MarketMaker] Risk blocked bid: ${bidRisk.reason}`, undefined, this.strategyId);
+        emitLog('WARN', `[MarketMaker] Risk blocked: ${bidRisk.reason}`, undefined, this.strategyId);
         return;
       }
 

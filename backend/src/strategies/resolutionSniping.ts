@@ -286,18 +286,6 @@ export class ResolutionSnipingStrategy {
         opportunity.availableSize,
       );
 
-      const riskCheck = this.risk.checkPreTrade(
-        this.strategyId,
-        this.config,
-        snipeSize * opportunity.currentWinningPrice,
-        0.001, // negligible slippage — we're sweeping a specific stale level
-      );
-
-      if (!riskCheck.approved) {
-        emitLog('WARN', `[ResolutionSnipe] Risk blocked: ${riskCheck.reason}`, undefined, this.strategyId);
-        return;
-      }
-
       if (this.config.dryRun) {
         emitLog(
           'INFO',
@@ -305,6 +293,18 @@ export class ResolutionSnipingStrategy {
           undefined,
           this.strategyId,
         );
+        return;
+      }
+
+      const riskCheck = this.risk.checkPreTrade(
+        this.strategyId,
+        this.config,
+        snipeSize * opportunity.currentWinningPrice,
+        0.001,
+      );
+
+      if (!riskCheck.approved) {
+        emitLog('WARN', `[ResolutionSnipe] Risk blocked: ${riskCheck.reason}`, undefined, this.strategyId);
         return;
       }
 

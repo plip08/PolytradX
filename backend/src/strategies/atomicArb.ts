@@ -55,7 +55,7 @@ export class AtomicArbStrategy {
   public status: StrategyStatus = 'IDLE';
 
   private readonly marketStates = new Map<string, MarketState>(); // marketId → state
-  private isExecuting = false;
+  private readonly executingMarkets = new Set<string>(); // per-market lock
   private mergeCount = 0;
   private totalPnL = 0;
 
@@ -137,10 +137,21 @@ export class AtomicArbStrategy {
   // ─── Core logic ───────────────────────────────────────────────────────────
 
   private async evaluateMarket(state: MarketState): Promise<void> {
-    if (this.isExecuting || !state.lastYesOb || !state.lastNoOb) return;
+    // Per-market lock to prevent concurrent executions on the same market
+    if (this.executingMarkets.has(state.market.id) || !state.lastYesOb || !state.lastNoOb) return;
 
     const opp = this.detectOpportunity(state);
     if (!opp) return;
+
+    if (this.config.dryRun) {
+      emitLog(
+        'INFO',
+        `[AtomicArb] DRY RUN — ${opp.optimalSize.toFixed(2)} pairs @ ${opp.combinedCost.toFixed(4)} → +$${(opp.netProfit * opp.optimalSize).toFixed(2)}`,
+        undefined,
+        this.strategyId,
+      );
+      return;
+    }
 
     const riskCheck = this.risk.checkPreTrade(
       this.strategyId,
@@ -154,7 +165,13 @@ export class AtomicArbStrategy {
       return;
     }
 
-    await this.execute(opp);
+    // Set lock before any await to prevent race condition
+    this.executingMarkets.add(state.market.id);
+    try {
+      await this.execute(opp);
+    } finally {
+      this.executingMarkets.delete(state.market.id);
+    }
   }
 
   private detectOpportunity(state: MarketState): ArbitrageOpportunity | null {
@@ -192,17 +209,6 @@ export class AtomicArbStrategy {
   }
 
   private async execute(opp: ArbitrageOpportunity): Promise<void> {
-    if (this.config.dryRun) {
-      emitLog(
-        'INFO',
-        `[AtomicArb] DRY RUN — ${opp.optimalSize.toFixed(2)} pairs @ ${opp.combinedCost.toFixed(4)} → +$${(opp.netProfit * opp.optimalSize).toFixed(2)}`,
-        undefined,
-        this.strategyId,
-      );
-      return;
-    }
-
-    this.isExecuting = true;
     this.status = 'EXECUTING';
     this.broadcastStatus();
 
@@ -231,6 +237,8 @@ export class AtomicArbStrategy {
 
       if (yesOrder.status !== 'FILLED' || noOrder.status !== 'FILLED') {
         emitLog('WARN', `[AtomicArb] Partial fill YES:${yesOrder.status} NO:${noOrder.status} — aborting merge`, undefined, this.strategyId);
+        // Release exposure locked by checkPreTrade
+        this.risk.releaseExposure(this.strategyId, opp.optimalSize * opp.combinedCost);
         return;
       }
 
@@ -248,6 +256,7 @@ export class AtomicArbStrategy {
 
       this.mergeCount++;
       this.totalPnL += pnl;
+      // Release the exposure locked at pre-trade check — position is now closed (merged)
       this.risk.releaseExposure(this.strategyId, opp.optimalSize * opp.combinedCost);
 
       const execution: TradeExecution = {
@@ -261,7 +270,7 @@ export class AtomicArbStrategy {
         pnl,
         txHash: receipt.hash,
         timestamp: Date.now(),
-        status: 'SUCCESS',
+        status: 'CLOSED', // CLOSED = realized, does not add to exposure in recordTrade
         gasUsed: receipt.gasUsed,
         polygonscanUrl: `https://polygonscan.com/tx/${receipt.hash}`,
       };
@@ -276,10 +285,10 @@ export class AtomicArbStrategy {
         this.strategyId,
       );
     } catch (err) {
+      this.risk.releaseExposure(this.strategyId, opp.optimalSize * opp.combinedCost);
       this.status = 'ERROR';
       emitLog('ERROR', `[AtomicArb] Execution failed: ${String(err)}`, undefined, this.strategyId);
     } finally {
-      this.isExecuting = false;
       if (this.status !== 'IDLE') this.status = 'SCANNING';
       this.broadcastStatus();
     }

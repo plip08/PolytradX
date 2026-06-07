@@ -236,8 +236,15 @@ export class ClobClient {
     const headers = await this.getAuthHeaders('POST', '/order', bodyStr);
     const salt = BigInt(Math.floor(Math.random() * 1e18));
     const tokenIdBig = BigInt(order.tokenId);
-    const makerAmount = BigInt(Math.round(order.size * order.price * 1e6)); // USDC 6 decimals
-    const takerAmount = BigInt(Math.round(order.size * 1e6));
+
+    // BUY:  maker gives USDC (makerAmount), receives tokens (takerAmount)
+    // SELL: maker gives tokens (makerAmount), receives USDC (takerAmount)
+    const makerAmount = order.side === 'BUY'
+      ? BigInt(Math.round(order.size * order.price * 1e6)) // USDC in (6 decimals)
+      : BigInt(Math.round(order.size * 1e6));               // tokens in (6 decimals)
+    const takerAmount = order.side === 'BUY'
+      ? BigInt(Math.round(order.size * 1e6))               // tokens out
+      : BigInt(Math.round(order.size * order.price * 1e6)); // USDC out
 
     const orderStruct = {
       salt,
@@ -260,6 +267,7 @@ export class ClobClient {
       ),
     );
 
+    const orderTypeMap: Record<string, string> = { MARKET: 'MKT', FOK: 'FOK', IOC: 'IOC' };
     const payload = {
       order: {
         ...Object.fromEntries(
@@ -268,7 +276,7 @@ export class ClobClient {
         signature,
       },
       owner: this.walletManager!.getAddress(),
-      orderType: order.type === 'MARKET' ? 'MKT' : 'GTC',
+      orderType: orderTypeMap[order.type] ?? 'GTC',
     };
 
     const res = await this.http.post<RawOrderResponse>('/order', payload, {
@@ -396,31 +404,44 @@ export class ClobClient {
     const existing = this.orderBookCache.get(msg.asset_id);
     if (!existing) return;
 
-    // Apply incremental update
-    if (msg.bids || msg.asks) {
-      const updatedOb: OrderBook = {
-        ...existing,
-        bids: msg.bids
-          ? msg.bids.map((b) => ({ price: parseFloat(b.price), size: parseFloat(b.size) }))
-          : existing.bids,
-        asks: msg.asks
-          ? msg.asks.map((a) => ({ price: parseFloat(a.price), size: parseFloat(a.size) }))
-          : existing.asks,
-        timestamp: Date.now(),
-      };
+    if (!msg.bids && !msg.asks) return;
 
-      updatedOb.bids.sort((a, b) => b.price - a.price);
-      updatedOb.asks.sort((a, b) => a.price - b.price);
-      updatedOb.bestBid = updatedOb.bids[0]?.price ?? 0;
-      updatedOb.bestAsk = updatedOb.asks[0]?.price ?? 1;
-      updatedOb.midPrice = (updatedOb.bestBid + updatedOb.bestAsk) / 2;
-      updatedOb.spread = updatedOb.bestAsk - updatedOb.bestBid;
-
-      this.orderBookCache.set(msg.asset_id, updatedOb);
-
-      for (const cb of this.obUpdateCallbacks.get(msg.asset_id) ?? []) {
-        cb(updatedOb);
+    // Polymarket sends deltas: size=0 means remove the level, size>0 means upsert
+    const mergeLevels = (
+      current: { price: number; size: number }[],
+      updates: { price: string; size: string }[],
+    ): { price: number; size: number }[] => {
+      const map = new Map(current.map((l) => [l.price, l.size]));
+      for (const u of updates) {
+        const p = parseFloat(u.price);
+        const s = parseFloat(u.size);
+        if (s === 0) map.delete(p);
+        else map.set(p, s);
       }
+      return Array.from(map.entries()).map(([price, size]) => ({ price, size }));
+    };
+
+    const newBids = msg.bids ? mergeLevels(existing.bids, msg.bids) : existing.bids;
+    const newAsks = msg.asks ? mergeLevels(existing.asks, msg.asks) : existing.asks;
+
+    newBids.sort((a, b) => b.price - a.price);
+    newAsks.sort((a, b) => a.price - b.price);
+
+    const updatedOb: OrderBook = {
+      ...existing,
+      bids: newBids,
+      asks: newAsks,
+      bestBid: newBids[0]?.price ?? 0,
+      bestAsk: newAsks[0]?.price ?? 1,
+      midPrice: ((newBids[0]?.price ?? 0) + (newAsks[0]?.price ?? 1)) / 2,
+      spread: (newAsks[0]?.price ?? 1) - (newBids[0]?.price ?? 0),
+      timestamp: Date.now(),
+    };
+
+    this.orderBookCache.set(msg.asset_id, updatedOb);
+
+    for (const cb of this.obUpdateCallbacks.get(msg.asset_id) ?? []) {
+      cb(updatedOb);
     }
   }
 
