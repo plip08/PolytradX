@@ -144,21 +144,49 @@ export interface PnlSnapshot {
 }
 
 export const STRATEGY_LABELS: Record<StrategyId, string> = {
-  ATOMIC_ARB: 'Atomic Arbitrage',
-  MARKET_MAKER: 'Market Maker',
-  LATENCY_ARB: 'Latency Arb',
-  LOGIC_ARB: 'Logic Arb',
-  NEGATIVE_RISK: 'Negative Risk',
+  ATOMIC_ARB:       'Atomic Arbitrage',
+  MARKET_MAKER:     'Market Maker',
+  LATENCY_ARB:      'Latency Arb',
+  LOGIC_ARB:        'Logic Arb',
+  NEGATIVE_RISK:    'Negative Risk',
   RESOLUTION_SNIPE: 'Resolution Sniper',
-  AI_AGENT: 'AI Agent',
+  AI_AGENT:         'AI Agent',
 };
 
 export const STRATEGY_DESCRIPTIONS: Record<StrategyId, string> = {
-  ATOMIC_ARB: 'Buys YES+NO simultaneously and merges for $1.00',
-  MARKET_MAKER: 'Delta-neutral bid/ask market making with < 100ms rebalance',
-  LATENCY_ARB: 'Sweeps stale liquidity on critical sports events',
-  LOGIC_ARB: 'Exploits logical price inconsistencies across correlated markets',
-  NEGATIVE_RISK: 'Buys NO tokens when sum of YES prices > 1.0 in categorical markets',
-  RESOLUTION_SNIPE: 'Snipes winning tokens priced < $0.99 before market closes',
-  AI_AGENT: 'LLM-powered news analysis → high-confidence trading signals',
+  ATOMIC_ARB:
+    'Sur Polymarket, chaque marché binaire a deux tokens : YES et NO. Ensemble ils valent exactement $1.00 à la résolution. ' +
+    'Si bestAsk(YES) + bestAsk(NO) < $1.00, le bot achète les deux simultanément en FOK, puis les fusionne (merge) on-chain pour encaisser $1.00. ' +
+    'Profit garanti = $1.00 − coût combiné − gas. Capital : $60.',
+
+  MARKET_MAKER:
+    'Poste en permanence un bid et un ask autour du prix médian pour capter le spread. ' +
+    'À chaque mouvement de prix > 0.5%, annule et re-poste les deux ordres en < 100ms. ' +
+    'Revenus : spread encaissé + rebates Polymarket pour liquidité fournie. Nécessite $5k+ pour être compétitif.',
+
+  LATENCY_ARB:
+    'Connecté à un feed sportif en temps réel (WebSocket). Quand un événement critique survient (but, fin de match), ' +
+    'vérifie si le carnet Polymarket reflète encore l\'ancien prix. ' +
+    'Si le lag > 5%, sweep agressif de toute la liquidité obsolète avant suspension du marché. Nécessite un abonnement Betfair/Pinnacle.',
+
+  LOGIC_ARB:
+    'Certaines paires de marchés ont des relations logiques : si "BTC > $100k" cote 30%, ' +
+    'alors "BTC > $90k" doit coter ≥ 30% (l\'implication logique l\'exige). ' +
+    'Toute inversion détectée au-delà de 5% de spread déclenche un achat du token sous-évalué. Capital : $20.',
+
+  NEGATIVE_RISK:
+    'Dans un événement multi-outcomes (ex: "Qui sera le prochain président ?"), exactement un outcome résout YES. ' +
+    'Donc la somme des prix YES doit être ≈ 1.0. Si elle dépasse 1.02, une arb mathématique existe : ' +
+    'acheter les tokens NO des outcomes sur-évalués. Profit garanti = excès au-dessus de 1.0. Capital : $45.',
+
+  RESOLUTION_SNIPE:
+    'Scanne toutes les 60s les marchés expirant dans < 6h (84 marchés actuellement). ' +
+    'Quand un marché résout mais que des vendeurs n\'ont pas encore mis à jour leurs ordres, ' +
+    'le bot achète instantanément les tokens gagnants sous-cotés (ex: YES à $0.92 au lieu de $1.00). ' +
+    'Profit garanti = $1.00 − prix_snipé − gas. Capital : $55.',
+
+  AI_AGENT:
+    'Analyse en continu les actualités et données de marché avec un LLM (Claude/GPT/Grok). ' +
+    'Génère des signaux de trading quand la confiance dépasse le seuil configuré (90%). ' +
+    'Utile pour anticiper des mouvements sur des marchés politiques ou d\'actualité. Désactivé : trop coûteux en tokens API.',
 };
