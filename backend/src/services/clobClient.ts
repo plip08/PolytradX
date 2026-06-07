@@ -116,9 +116,15 @@ export class ClobClient {
   private readonly orderBookCache = new Map<string, OrderBook>(); // tokenId → OrderBook
   private readonly obUpdateCallbacks = new Map<string, Set<(ob: OrderBook) => void>>();
 
-  private authHeaders: Record<string, string> = {};
-  private authExpiry = 0;
-  private readonly AUTH_TTL_MS = 5 * 60 * 1000; // 5 min
+  private readonly hasL2Creds = !!(
+    process.env['POLYMARKET_CLOB_API_KEY'] &&
+    process.env['POLYMARKET_CLOB_SECRET'] &&
+    process.env['POLYMARKET_CLOB_PASSPHRASE']
+  );
+  // L1 fallback cache only (L2 headers are per-request)
+  private l1AuthHeaders: Record<string, string> = {};
+  private l1AuthExpiry = 0;
+  private readonly AUTH_TTL_MS = 5 * 60 * 1000;
 
   private constructor() {
     this.baseUrl = process.env['POLYMARKET_CLOB_API_URL'] ?? 'https://clob.polymarket.com';
@@ -150,14 +156,25 @@ export class ClobClient {
 
   // ─── Auth ─────────────────────────────────────────────────────────────────
 
-  private async getAuthHeaders(): Promise<Record<string, string>> {
-    if (Date.now() < this.authExpiry && Object.keys(this.authHeaders).length > 0) {
-      return this.authHeaders;
-    }
+  private async getAuthHeaders(
+    method = 'GET',
+    requestPath = '',
+    body = '',
+  ): Promise<Record<string, string>> {
     if (!this.walletManager) throw new Error('Wallet not configured');
-    this.authHeaders = await buildClobAuthHeaders(this.walletManager);
-    this.authExpiry = Date.now() + this.AUTH_TTL_MS;
-    return this.authHeaders;
+
+    // L2: always build fresh (HMAC is per-request)
+    if (this.hasL2Creds) {
+      return buildClobAuthHeaders(this.walletManager, method, requestPath, body);
+    }
+
+    // L1 fallback: cache for TTL
+    if (Date.now() < this.l1AuthExpiry && Object.keys(this.l1AuthHeaders).length > 0) {
+      return this.l1AuthHeaders;
+    }
+    this.l1AuthHeaders = await buildClobAuthHeaders(this.walletManager);
+    this.l1AuthExpiry = Date.now() + this.AUTH_TTL_MS;
+    return this.l1AuthHeaders;
   }
 
   // ─── Market Data ──────────────────────────────────────────────────────────
@@ -215,7 +232,8 @@ export class ClobClient {
   // ─── Order Placement ──────────────────────────────────────────────────────
 
   async placeOrder(order: ClobOrder): Promise<ClobOrderResponse> {
-    const headers = await this.getAuthHeaders();
+    const bodyStr = JSON.stringify({ orderType: order.type });
+    const headers = await this.getAuthHeaders('POST', '/order', bodyStr);
     const salt = BigInt(Math.floor(Math.random() * 1e18));
     const tokenIdBig = BigInt(order.tokenId);
     const makerAmount = BigInt(Math.round(order.size * order.price * 1e6)); // USDC 6 decimals
@@ -277,19 +295,20 @@ export class ClobClient {
   }
 
   async cancelOrder(orderId: string): Promise<void> {
-    const headers = await this.getAuthHeaders();
-    await this.http.delete(`/order/${orderId}`, { headers });
+    const path = `/order/${orderId}`;
+    const headers = await this.getAuthHeaders('DELETE', path);
+    await this.http.delete(path, { headers });
     emitLog('INFO', `Order cancelled: ${orderId}`);
   }
 
   async cancelAllOrders(): Promise<void> {
-    const headers = await this.getAuthHeaders();
+    const headers = await this.getAuthHeaders('DELETE', '/orders');
     await this.http.delete('/orders', { headers });
     emitLog('WARN', 'All orders cancelled — kill switch triggered');
   }
 
   async getOpenOrders(): Promise<ClobOrder[]> {
-    const headers = await this.getAuthHeaders();
+    const headers = await this.getAuthHeaders('GET', '/orders');
     const res = await this.http.get<{ data: ClobOrder[] }>('/orders', {
       headers,
       params: { status: 'OPEN' },

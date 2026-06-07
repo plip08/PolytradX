@@ -319,15 +319,39 @@ export function computePositionId(
 /** Builds auth headers for Polymarket CLOB REST API */
 export async function buildClobAuthHeaders(
   wallet: WalletManager,
+  method = 'GET',
+  requestPath = '',
+  body = '',
 ): Promise<Record<string, string>> {
-  const timestamp = Math.floor(Date.now() / 1000).toString();
-  const nonce = '0';
-  const signature = await wallet.signClobAuth(timestamp, nonce);
+  const apiKey        = process.env['POLYMARKET_CLOB_API_KEY'] ?? '';
+  const secret        = process.env['POLYMARKET_CLOB_SECRET'] ?? '';
+  const passphrase    = process.env['POLYMARKET_CLOB_PASSPHRASE'] ?? '';
+  const timestamp     = Math.floor(Date.now() / 1000).toString();
+  const nonce         = '0';
 
+  // If L2 credentials are configured, use HMAC-SHA256 (required for order placement)
+  if (apiKey && secret && passphrase) {
+    const { createHmac } = await import('crypto');
+    const message   = timestamp + method.toUpperCase() + requestPath + body;
+    const rawSecret = Buffer.from(secret, 'base64');
+    const signature = createHmac('sha256', rawSecret).update(message).digest('base64');
+
+    return {
+      POLY_ADDRESS:    wallet.getAddress(),
+      POLY_SIGNATURE:  signature,
+      POLY_TIMESTAMP:  timestamp,
+      POLY_NONCE:      nonce,
+      POLY_API_KEY:    apiKey,
+      POLY_PASSPHRASE: passphrase,
+    };
+  }
+
+  // Fallback: L1 wallet signature (read-only endpoints only)
+  const signature = await wallet.signClobAuth(timestamp, nonce);
   return {
-    POLY_ADDRESS: wallet.getAddress(),
+    POLY_ADDRESS:   wallet.getAddress(),
     POLY_SIGNATURE: signature,
     POLY_TIMESTAMP: timestamp,
-    POLY_NONCE: nonce,
+    POLY_NONCE:     nonce,
   };
 }
