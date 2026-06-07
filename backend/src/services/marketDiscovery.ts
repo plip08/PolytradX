@@ -27,19 +27,20 @@ interface GammaMarket {
   endDate: string;
   active: boolean;
   closed: boolean;
-  outcomes: string[];      // e.g. ["Yes", "No"]
-  clobTokenIds: string[];  // parallel array to outcomes
-  volume: number;
-  volume24hr?: number;
-  liquidity: number;
+  outcomes: string;           // JSON string: "[\"Yes\", \"No\"]"
+  clobTokenIds: string;       // JSON string: "[\"<id1>\", \"<id2>\"]"
+  volume: string | number;    // string at market level, number at event-market level
+  volume24hr?: string | number;
+  liquidity: string | number | null;
   negRisk?: boolean;
+  tags?: { label: string }[];
 }
 
 interface GammaEvent {
   id: string;
   title: string;
   markets: GammaMarket[];
-  volume?: number;
+  volume?: number;            // float at event level
   active: boolean;
   closed: boolean;
 }
@@ -78,12 +79,21 @@ function detectCategory(market: GammaMarket): MarketCategory {
 const USDC_POLYGON = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174';
 
 function parseMarket(g: GammaMarket): MarketInfo | null {
-  const yesIdx = g.outcomes?.findIndex((o) => o.toLowerCase() === 'yes') ?? -1;
-  const noIdx  = g.outcomes?.findIndex((o) => o.toLowerCase() === 'no')  ?? -1;
+  let outcomes: string[];
+  let tokenIds: string[];
+  try {
+    outcomes = JSON.parse(g.outcomes) as string[];
+    tokenIds = JSON.parse(g.clobTokenIds) as string[];
+  } catch {
+    return null;
+  }
+
+  const yesIdx = outcomes.findIndex((o) => o.toLowerCase() === 'yes');
+  const noIdx  = outcomes.findIndex((o) => o.toLowerCase() === 'no');
   if (yesIdx < 0 || noIdx < 0) return null;
 
-  const yesTokenId = g.clobTokenIds?.[yesIdx] ?? '';
-  const noTokenId  = g.clobTokenIds?.[noIdx]  ?? '';
+  const yesTokenId = tokenIds[yesIdx] ?? '';
+  const noTokenId  = tokenIds[noIdx]  ?? '';
   if (!yesTokenId || !noTokenId) return null;
 
   return {
@@ -222,7 +232,7 @@ export class MarketDiscovery {
 
     for (const event of res.data ?? []) {
       if (!event.active || event.closed) continue;
-      if (parseFloat(event.volume ?? '0') < this.config.minVolumeUsd) continue;
+      if ((event.volume ?? 0) < this.config.minVolumeUsd) continue;
 
       const groupMarkets: MarketInfo[] = [];
       for (const g of event.markets ?? []) {
