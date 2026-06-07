@@ -15,7 +15,7 @@
 
 ## Docker
 
-Build the image:
+Build the image:~~~~
 ```bash
 npm run docker:build
 ```
@@ -30,22 +30,29 @@ Stop the stack:
 npm run docker:down
 ```
 
+# Tester le monitoring
+docker-compose up -d prometheus grafana node-exporter
+
+# Accéder à Grafana
+open http://localhost:3001  # admin/admin
+
 ## Deployment
 
 ### VPS (backend + Redis + PostgreSQL)
 
 1. Copy `.env.example` to `.env` on the VPS.
 2. Fill in the real secrets and remote proxy URL.
-3. Run the VPS setup helper:
+3. If you use Hetzner Germany, follow `HETZNER_GERMANY_SETUP.md`.
+4. Run the VPS setup helper:
    ```bash
    chmod +x setup-vps.sh deploy.sh
    ./setup-vps.sh
    ```
-4. Then deploy the stack:
+5. Then deploy the stack:
    ```bash
    ./deploy.sh
    ```
-5. Check service health:
+6. Check service health:
    ```bash
    docker compose ps
    docker compose logs -f backend

@@ -1,0 +1,57 @@
+groups:
+  - name: polymarket_bot_alerts
+    interval: 30s
+    rules:
+      - alert: BotDown
+        expr: up{job="polymarket-bot"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Polymarket bot is down"
+          description: "The bot has been down for more than 1 minute"
+
+      - alert: CircuitBreakerTripped
+        expr: circuit_breaker_status == 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Circuit breaker has been tripped"
+          description: "Trading has been halted due to circuit breaker"
+
+      - alert: HighRiskEvents
+        expr: rate(risk_events_total{severity="HIGH"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High number of risk events detected"
+          description: "More than 6 high-severity risk events per minute"
+
+      - alert: LowWinRate
+        expr: rate(trades_successful_total[1h]) / rate(trades_total[1h]) < 0.5
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Win rate below 50%"
+          description: "Bot win rate has dropped below 50% over the last hour"
+
+      - alert: DailyLossLimitApproaching
+        expr: sum(pnl_usd) < -8000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Daily loss limit approaching"
+          description: "Current daily P&L is approaching the -$10k limit"
+
+      - alert: HighMemoryUsage
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High memory usage on VPS"
+          description: "Available memory is below 10%"

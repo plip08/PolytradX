@@ -1,0 +1,148 @@
+{
+  "dashboard": {
+    "title": "Polymarket Quant Bot Monitoring",
+    "tags": ["polymarket", "trading", "bot"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Bot Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "bot_status",
+            "legendFormat": "Status"
+          }
+        ],
+        "gridPos": {
+          "x": 0,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        }
+      },
+      {
+        "id": 2,
+        "title": "Total Trades (24h)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "increase(trades_total[24h])",
+            "legendFormat": "Trades"
+          }
+        ],
+        "gridPos": {
+          "x": 6,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        }
+      },
+      {
+        "id": 3,
+        "title": "Circuit Breaker Status",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "circuit_breaker_status",
+            "legendFormat": "CB Status"
+          }
+        ],
+        "gridPos": {
+          "x": 12,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        }
+      },
+      {
+        "id": 4,
+        "title": "P&L (USD)",
+        "type": "stat",
+        "targets": [
+          {
+            "expr": "sum(pnl_usd)",
+            "legendFormat": "Total P&L"
+          }
+        ],
+        "gridPos": {
+          "x": 18,
+          "y": 0,
+          "w": 6,
+          "h": 4
+        }
+      },
+      {
+        "id": 5,
+        "title": "Trades by Strategy",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(trades_total{strategy!=\"\"}[5m])",
+            "legendFormat": "{{strategy}}"
+          }
+        ],
+        "gridPos": {
+          "x": 0,
+          "y": 4,
+          "w": 12,
+          "h": 8
+        }
+      },
+      {
+        "id": 6,
+        "title": "Win Rate by Strategy",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(trades_successful_total{strategy!=\"\"}[5m]) / rate(trades_total{strategy!=\"\"}[5m])",
+            "legendFormat": "{{strategy}}"
+          }
+        ],
+        "gridPos": {
+          "x": 12,
+          "y": 4,
+          "w": 12,
+          "h": 8
+        }
+      },
+      {
+        "id": 7,
+        "title": "Average Trade Size (USD)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "avg_over_time(trade_size_usd[5m])",
+            "legendFormat": "Avg Size"
+          }
+        ],
+        "gridPos": {
+          "x": 0,
+          "y": 12,
+          "w": 12,
+          "h": 8
+        }
+      },
+      {
+        "id": 8,
+        "title": "Risk Events",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(risk_events_total{severity!=\"\"}[5m])",
+            "legendFormat": "{{severity}}"
+          }
+        ],
+        "gridPos": {
+          "x": 12,
+          "y": 12,
+          "w": 12,
+          "h": 8
+        }
+      }
+    ],
+    "refresh": "10s",
+    "schemaVersion": 16,
+    "version": 0
+  }
+}

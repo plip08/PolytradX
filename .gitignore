@@ -12,6 +12,10 @@ pnpm-lock.yaml
 dist
 coverage
 .vscode
+.idea
 .vercel
 docker-compose.override.yml
 *.log
+.next/
+frontend/.next/
+frontend/node_modules/

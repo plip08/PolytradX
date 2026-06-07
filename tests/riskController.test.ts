@@ -8,7 +8,7 @@ const riskController = new RiskController(new CircuitBreaker(), new RiskManager(
 const validDecision = {
   marketId: "test-market",
   expectedEdge: 0.01,
-  tradeSizeUsd: 1000,
+  tradeSizeUsd: 100,
   reason: "Test decision",
   type: "BUY",
   side: "BUY",
