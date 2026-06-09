@@ -1,0 +1,40 @@
+// Backend (v2 bot) Prisma schema — owns the bot's own trade ledger.
+// Kept separate from the legacy root schema (User/auth/etc.); the bot only needs to
+// persist the trades it executes. Table: bot_trades.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model BotTrade {
+  id             String    @id // == TradeExecution.id (uuid) — idempotent upsert key
+  strategyId     String
+  marketId       String
+  tokenId        String
+  walletAddress  String
+  side           String
+  status         String // PENDING | SUCCESS | FAILED | SIMULATED
+  priceUsd       Decimal   @db.Decimal(30, 12)
+  size           Decimal   @db.Decimal(30, 12)
+  notionalUsd    Decimal   @db.Decimal(30, 12)
+  slippagePct    Decimal?  @db.Decimal(12, 8)
+  pnlUsd         Decimal?  @db.Decimal(30, 12)
+  txHash         String?   @unique
+  gasUsed        BigInt?
+  gasCostUsd     Decimal?  @db.Decimal(30, 12)
+  errorMessage   String?
+  polygonscanUrl String?
+  executedAt     DateTime
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([strategyId])
+  @@index([marketId])
+  @@index([executedAt])
+  @@map("bot_trades")
+}

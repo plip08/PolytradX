@@ -12,6 +12,7 @@
 import { logger, emitLog } from '../utils/logger.js';
 import { BotWebSocketServer } from '../core/wsServer.js';
 import type { StrategyId, StrategyConfig, TradeExecution } from '../types/index.js';
+import type { TradeStore } from './tradeStore.js';
 
 interface RiskState {
   sessionStartPnL: number;
@@ -47,6 +48,14 @@ export class RiskManager {
   };
 
   private readonly MAX_POSITIONS = 20;
+
+  // Optional best-effort trade persistence — never on the trading critical path.
+  private tradeStore: TradeStore | null = null;
+
+  /** Wire up Postgres persistence; trades flow through recordTrade(). */
+  attachTradeStore(store: TradeStore): void {
+    this.tradeStore = store;
+  }
 
   // Both can be updated at runtime when settings change
   private maxTotalExposureUsd = parseFloat(process.env['MAX_GLOBAL_CAPITAL_USD'] ?? '10000');
@@ -162,6 +171,10 @@ export class RiskManager {
       cumulativePnL: this.state.cumulativePnL,
       dailyPnL: this.state.dailyPnL,
     });
+
+    // Fire-and-forget persistence — persist() swallows its own errors so a DB
+    // problem can never disrupt risk accounting or trading.
+    void this.tradeStore?.persist(execution);
   }
 
   /** Call when a position is closed */
