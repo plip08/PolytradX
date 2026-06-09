@@ -317,8 +317,10 @@ export class StrategyRunner {
   }
 
   updateConfig(id: StrategyId, partial: Partial<StrategyConfig>): void {
-    const existing = this.configMap[id];
-    this.configMap[id] = { ...existing, ...partial };
+    // Mutate IN PLACE — each strategy holds a reference to this exact config object.
+    // Replacing it (configMap[id] = {...}) would leave the running strategy on its old
+    // config, so a dryRun/limit change would silently not take effect until restart.
+    Object.assign(this.configMap[id], partial);
 
     BotWebSocketServer.getInstance().broadcast('CONFIG_UPDATED', {
       strategyId: id,
@@ -326,6 +328,27 @@ export class StrategyRunner {
     });
 
     emitLog('INFO', `[StrategyRunner] Config updated for ${id}`, partial);
+  }
+
+  /**
+   * Flip dry-run vs LIVE trading across ALL strategies at runtime, in place, so the
+   * change takes effect immediately on the running strategies (each executes on
+   * this.config.dryRun). Used by the dashboard mode toggle.
+   */
+  setDryRun(enabled: boolean): void {
+    for (const id of Object.keys(this.configMap) as StrategyId[]) {
+      this.configMap[id].dryRun = enabled;
+      BotWebSocketServer.getInstance().broadcast('CONFIG_UPDATED', {
+        strategyId: id,
+        config: this.configMap[id],
+      });
+    }
+    emitLog(
+      'WARN',
+      `[StrategyRunner] DRY_RUN=${enabled} applied to all strategies — ${
+        enabled ? 'SIMULATION ONLY (no real orders)' : '⚠️ LIVE TRADING ENABLED (real orders)'
+      }`,
+    );
   }
 
   private broadcastSnapshot(): void {
