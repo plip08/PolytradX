@@ -5,6 +5,8 @@ yarn-error.log*
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+# but the backend lock IS tracked so CI (npm ci) is reproducible
+!backend/package-lock.json
 .DS_Store
 .env
 .env.local
