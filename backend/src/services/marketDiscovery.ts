@@ -323,7 +323,12 @@ export class MarketDiscovery {
 
     const crypto    = markets.filter((m) => m.category === 'crypto').slice(0, cap);
     const sports    = markets.filter((m) => m.category === 'sports').slice(0, cap);
-    const allLiquid = markets.slice(0, cap);
+    // crypto/sports are capped because AtomicArb/LatencyArb/ResolutionSnipe open a WS
+    // order-book subscription per market. The allLiquid consumers (LogicArb, AiAgent)
+    // only poll books for the few pairs/markets they pick, so they get the FULL list —
+    // capping it here starved LogicArb of the lower-volume threshold markets its ladders
+    // need (it builds at most maxPairsToTrack pairs regardless of input size).
+    const allLiquid = markets;
 
     if (crypto.length > 0) {
       this.handlers.onCryptoMarkets?.(crypto);
@@ -337,6 +342,7 @@ export class MarketDiscovery {
 
     if (allLiquid.length > 0) {
       this.handlers.onAllLiquidMarkets?.(allLiquid);
+      emitLog('INFO', `[MarketDiscovery] → LogicArb/AiAgent: ${allLiquid.length} liquid markets`);
     }
 
     if (eventGroups.length > 0) {
