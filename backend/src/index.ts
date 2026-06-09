@@ -28,6 +28,7 @@ import { TransactionManager } from './core/transactionManager.js';
 import { ClobClient } from './services/clobClient.js';
 import { CtfClient } from './services/ctfClient.js';
 import { RiskManager } from './services/riskManager.js';
+import { TradeStore } from './services/tradeStore.js';
 import { StrategyRunner } from './services/strategyRunner.js';
 import { logger, registerWsLogForwarder, emitLog } from './utils/logger.js';
 import type { ConfigMap, StrategyId, WsMessage, LogEntry } from './types/index.js';
@@ -179,8 +180,12 @@ async function main(): Promise<void> {
     logger.warn('[Boot] CTF approval check failed (may be already approved)', { err });
   });
 
-  // 8. Risk Manager
+  // 8. Risk Manager (+ best-effort Postgres trade persistence)
   const risk = RiskManager.getInstance();
+
+  const tradeStore = new TradeStore(walletManager.getAddress());
+  await tradeStore.connect(); // degrades gracefully if DB is unset/unreachable
+  risk.attachTradeStore(tradeStore);
 
   // 9. Strategy Runner
   const runner = StrategyRunner.getInstance(clob, ctf, risk, wallet, txManager, DEFAULT_CONFIG);
@@ -384,6 +389,7 @@ async function main(): Promise<void> {
     logger.info(`[Boot] ${signal} received — shutting down gracefully`);
     runner.stopAll();
     providerManager.destroy();
+    await tradeStore.disconnect();
     process.exit(0);
   };
 
