@@ -274,6 +274,7 @@ export interface MultiCategoryMarket {
   }>;
   sumYesPrices: number;
   excessAboveOne: number;  // sumYesPrices - 1.0 = guaranteed profit pct
+  tradeable: boolean;      // false if any outcome lacks a real ask (sum would be a phantom)
 }
 
 export interface NegativeRiskAllocation {
@@ -384,6 +385,8 @@ export type WsMessageType =
   | 'GAS_UPDATE'
   | 'ORACLE_PROPOSAL'
   | 'SPORT_EVENT_UPDATE'
+  | 'CIRCUIT_BREAKER_OPEN'
+  | 'CIRCUIT_BREAKER_RESET'
   | 'PNL_UPDATE';
 
 export interface WsMessage<T = unknown> {

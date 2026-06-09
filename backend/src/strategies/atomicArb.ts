@@ -270,7 +270,7 @@ export class AtomicArbStrategy {
         pnl,
         txHash: receipt.hash,
         timestamp: Date.now(),
-        status: 'CLOSED', // CLOSED = realized, does not add to exposure in recordTrade
+        status: 'SUCCESS', // realized atomic merge — recordTrade adds no exposure for non-PENDING
         gasUsed: receipt.gasUsed,
         polygonscanUrl: `https://polygonscan.com/tx/${receipt.hash}`,
       };
@@ -289,7 +289,10 @@ export class AtomicArbStrategy {
       this.status = 'ERROR';
       emitLog('ERROR', `[AtomicArb] Execution failed: ${String(err)}`, undefined, this.strategyId);
     } finally {
-      if (this.status !== 'IDLE') this.status = 'SCANNING';
+      // status is a mutable class property — a concurrent stop() may have set it to
+      // 'IDLE' across an await, so don't let TS narrow it away. Don't resurrect a
+      // stopped strategy back to SCANNING.
+      if ((this.status as StrategyStatus) !== 'IDLE') this.status = 'SCANNING';
       this.broadcastStatus();
     }
   }

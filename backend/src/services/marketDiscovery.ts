@@ -43,6 +43,7 @@ interface GammaEvent {
   volume?: number;            // float at event level
   active: boolean;
   closed: boolean;
+  negRisk?: boolean;          // true ⇒ outcomes are mutually exclusive (exactly one resolves YES)
 }
 
 // ─── Discovery config ─────────────────────────────────────────────────────────
@@ -255,9 +256,9 @@ export class MarketDiscovery {
 
       for (const g of batch) {
         // Volume filter
-        if (parseFloat(g.volume ?? '0') < this.config.minVolumeUsd) continue;
+        if (parseFloat(String(g.volume ?? '0')) < this.config.minVolumeUsd) continue;
         // Liquidity filter
-        if (parseFloat(g.liquidity ?? '0') < this.config.minLiquidityUsd) continue;
+        if (parseFloat(String(g.liquidity ?? '0')) < this.config.minLiquidityUsd) continue;
         // Expiry filter (must have > minExpiryMs remaining)
         const expiry = new Date(g.endDate).getTime();
         if (expiry - now < this.config.minExpiryMs) continue;
@@ -289,6 +290,14 @@ export class MarketDiscovery {
       if (!event.active || event.closed) continue;
       if ((event.volume ?? 0) < this.config.minVolumeUsd) continue;
 
+      // NegativeRisk math (Sum(YES) ≈ 1.0) only holds for TRUE mutually-exclusive
+      // events where exactly one outcome resolves YES. Polymarket flags these with
+      // negRisk=true. Thematic bundles of independent binary markets (e.g. "X out by
+      // <date>" thresholds, which are temporally nested, not exclusive) have negRisk
+      // false and must NOT be treated as a neg-risk group — their YES prices can sum
+      // to anything (we saw 4.12) and would produce garbage arb signals.
+      if (event.negRisk !== true) continue;
+
       const groupMarkets: MarketInfo[] = [];
       for (const g of event.markets ?? []) {
         if (g.closed) continue;
@@ -298,7 +307,7 @@ export class MarketDiscovery {
         if (market) groupMarkets.push(market);
       }
 
-      // Only useful for NegativeRisk if there are 3+ outcomes
+      // A valid neg-risk event needs at least 3 live outcomes
       if (groupMarkets.length >= 3) {
         groups.push(groupMarkets);
       }
