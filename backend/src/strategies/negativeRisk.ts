@@ -97,7 +97,7 @@ export class NegativeRiskStrategy {
         const market = await this.buildMarketSnapshot(group);
         this.lastGroupSnapshot.set(group.groupId, market);
 
-        if (market.sumYesPrices > 1.0 + this.params.minExcessThreshold) {
+        if (market.tradeable && market.sumYesPrices > 1.0 + this.params.minExcessThreshold) {
           emitLog(
             'WARN',
             `[NegativeRisk] Opportunity in "${group.description}" | sum=${market.sumYesPrices.toFixed(4)} excess=${market.excessAboveOne.toFixed(4)}`,
@@ -119,17 +119,25 @@ export class NegativeRiskStrategy {
   private async buildMarketSnapshot(
     group: NegativeRiskParams['marketGroups'][number],
   ): Promise<MultiCategoryMarket> {
-    // Fetch all order books in parallel
-    const books = await Promise.all(group.tokenIds.map((id) => this.clob.getOrderBook(id)));
+    // Fetch all order books in parallel. A single illiquid/new outcome can 404 on
+    // /book — don't let one bad leg reject the whole group; treat it as a missing
+    // book (which marks the group non-tradeable below).
+    const settled = await Promise.allSettled(group.tokenIds.map((id) => this.clob.getOrderBook(id)));
+    const books = settled.map((r) => (r.status === 'fulfilled' ? r.value : null));
 
     const outcomes = books.map((ob, i) => ({
       tokenId: group.tokenIds[i] ?? '',
       marketId: group.marketIds[i] ?? '',
       label: group.labels[i] ?? `Outcome ${i}`,
-      yesPrice: ob.bestAsk, // cost to BUY YES
-      noPrice: 1 - ob.bestBid, // effective NO price = 1 - best bid for YES
-      impliedProbability: ob.midPrice,
+      yesPrice: ob?.bestAsk ?? 1, // cost to BUY YES (1 = no offer)
+      noPrice: 1 - (ob?.bestBid ?? 0), // effective NO price = 1 - best bid for YES
+      impliedProbability: ob?.midPrice ?? 0.5,
     }));
+
+    // An outcome with no asks (or no book at all) has a phantom YES price that would
+    // inflate the sum and fake an arb. The neg-risk sum is only meaningful if EVERY
+    // outcome has a real ask quote.
+    const tradeable = books.every((ob) => ob !== null && ob.asks.length > 0);
 
     const sumYesPrices = outcomes.reduce((acc, o) => acc + o.yesPrice, 0);
 
@@ -139,6 +147,7 @@ export class NegativeRiskStrategy {
       outcomes,
       sumYesPrices,
       excessAboveOne: sumYesPrices - 1.0,
+      tradeable,
     };
   }
 

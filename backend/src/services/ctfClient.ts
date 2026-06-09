@@ -183,6 +183,18 @@ export class CtfClient {
 
     if (approved) return;
 
+    // ─── SAFETY GUARD ──────────────────────────────────────────────────────────
+    // setApprovalForAll is a REAL on-chain transaction that spends gas. In dry-run
+    // mode we must never broadcast it — log loudly and skip so a sandbox boot stays
+    // 100% read-only / off-chain.
+    if (process.env['DRY_RUN'] === 'true') {
+      emitLog(
+        'WARN',
+        `[DRY_RUN] CTF → CLOB approval skipped — would have sent setApprovalForAll(${exchangeAddr}, true) from ${owner}. Run with DRY_RUN=false to approve for real.`,
+      );
+      return;
+    }
+
     const overrides = await this.txManager.buildGasOverrides(gasStrategy);
     await this.txManager.submit(
       () =>

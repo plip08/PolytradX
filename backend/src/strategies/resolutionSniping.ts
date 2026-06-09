@@ -41,6 +41,14 @@ const UMA_OO_ABI = [
 
 const UMA_OO_ADDRESS = '0xeE3Afe347D5C74317041E2618C49534dAf887c24'; // Polygon mainnet
 
+// Oracle events are read via eth_getLogs over a moving block window instead of
+// ethers' .on() event subscriptions. On HTTP providers .on() installs a server-side
+// filter (eth_newFilter + eth_getFilterChanges); public/load-balanced RPC nodes expire
+// or don't share that filter, spamming "-32000 filter not found". eth_getLogs is
+// stateless and immune to this.
+const ORACLE_SCAN_INTERVAL_MS = 15_000;
+const ORACLE_MAX_BLOCK_RANGE = 1_000; // cap per eth_getLogs call (provider limits)
+
 interface ResolutionSnipingParams {
   // Markets to monitor for resolution
   watchedMarkets: Array<{
@@ -69,6 +77,9 @@ export class ResolutionSnipingStrategy {
   private readonly umaContract: Contract;
   private readonly watchedResolutions = new Map<string, WatchedResolution>();
   private readonly pendingProposals = new Map<string, OracleProposal>();
+  private oracleScanTimer: ReturnType<typeof setInterval> | null = null;
+  private lastScannedBlock = 0;
+  private oracleScanInFlight = false;
   private totalSnipes = 0;
   private totalPnL = 0;
 
@@ -105,7 +116,7 @@ export class ResolutionSnipingStrategy {
     if (this.status !== 'IDLE' && this.status !== 'PAUSED') return;
     this.status = 'SCANNING';
 
-    this.startOracleListener();
+    void this.startOracleListener();
     this.initWatchedMarkets();
 
     emitLog('INFO', '[ResolutionSnipe] Strategy started', undefined, this.strategyId);
@@ -113,6 +124,8 @@ export class ResolutionSnipingStrategy {
   }
 
   stop(): void {
+    if (this.oracleScanTimer) clearInterval(this.oracleScanTimer);
+    this.oracleScanTimer = null;
     this.umaContract.removeAllListeners();
 
     for (const wr of this.watchedResolutions.values()) {
@@ -127,53 +140,96 @@ export class ResolutionSnipingStrategy {
 
   // ─── Strategy 6: Oracle Monitoring ───────────────────────────────────────
 
-  private startOracleListener(): void {
-    this.umaContract.on(
-      'ProposePrice',
-      (
-        requester: string,
-        identifier: string,
-        timestamp: bigint,
-        ancillaryData: string,
-        proposer: string,
-        proposedPrice: bigint,
-        expirationTimestamp: bigint,
-      ) => {
-        const proposal: OracleProposal = {
-          proposalId: `${requester}_${timestamp.toString()}`,
-          marketId: this.extractMarketId(ancillaryData),
-          conditionId: identifier,
-          proposedOutcome: proposedPrice > 0n ? 'YES' : 'NO',
-          bondAmount: 0n,
-          proposalTimestamp: Number(timestamp),
-          expiryTimestamp: Number(expirationTimestamp),
-          status: 'PENDING',
-          blockNumber: 0,
-        };
+  private async startOracleListener(): Promise<void> {
+    // Anchor at the current head so we only react to new proposals, no backfill.
+    try {
+      this.lastScannedBlock = await this.provider.getBlockNumber();
+    } catch {
+      this.lastScannedBlock = 0; // retry on first scan tick
+    }
 
-        this.pendingProposals.set(proposal.proposalId, proposal);
+    this.oracleScanTimer = setInterval(() => void this.scanOracleEvents(), ORACLE_SCAN_INTERVAL_MS);
+    emitLog('INFO', '[ResolutionSnipe] UMA oracle listener active (eth_getLogs polling)');
+  }
 
-        BotWebSocketServer.getInstance().broadcast('ORACLE_PROPOSAL', proposal);
-        emitLog(
-          'INFO',
-          `[ResolutionSnipe] Oracle proposal: ${proposal.proposedOutcome} for ${proposal.marketId} expires in ${Math.round((proposal.expiryTimestamp - Date.now() / 1000) / 60)}min`,
-          undefined,
-          this.strategyId,
-        );
-      },
-    );
-
-    this.umaContract.on('Settle', (requester: string, _id: string, timestamp: bigint, ancillaryData: string) => {
-      const proposalId = `${requester}_${timestamp.toString()}`;
-      const proposal = this.pendingProposals.get(proposalId);
-      if (proposal) {
-        proposal.status = 'SETTLED';
-        this.pendingProposals.delete(proposalId);
-        emitLog('INFO', `[ResolutionSnipe] Oracle settled for ${proposal.marketId}`, undefined, this.strategyId);
+  /** Poll new UMA oracle logs over a moving block window (stateless, RPC-failover safe). */
+  private async scanOracleEvents(): Promise<void> {
+    if (this.oracleScanInFlight) return; // skip if previous scan still running
+    this.oracleScanInFlight = true;
+    try {
+      const latest = await this.provider.getBlockNumber();
+      if (this.lastScannedBlock === 0) {
+        this.lastScannedBlock = latest;
+        return;
       }
-    });
+      if (latest <= this.lastScannedBlock) return;
 
-    emitLog('INFO', '[ResolutionSnipe] UMA oracle listener active');
+      let from = this.lastScannedBlock + 1;
+      while (from <= latest) {
+        const to = Math.min(from + ORACLE_MAX_BLOCK_RANGE - 1, latest);
+        const [proposes, settles] = await Promise.all([
+          this.umaContract.queryFilter('ProposePrice', from, to),
+          this.umaContract.queryFilter('Settle', from, to),
+        ]);
+        for (const log of proposes) this.handleProposePrice(log);
+        for (const log of settles) this.handleSettle(log);
+        // Advance only after the range is processed so a mid-range throw retries it.
+        this.lastScannedBlock = to;
+        from = to + 1;
+      }
+    } catch (err) {
+      // Transient RPC hiccup — keep lastScannedBlock and retry the same range next tick.
+      emitLog('WARN', `[ResolutionSnipe] Oracle scan error (will retry): ${String(err)}`, undefined, this.strategyId);
+    } finally {
+      this.oracleScanInFlight = false;
+    }
+  }
+
+  private handleProposePrice(log: ethers.EventLog | ethers.Log): void {
+    const args = (log as ethers.EventLog).args;
+    if (!args) return;
+
+    const requester = args['requester'] as string;
+    const identifier = args['identifier'] as string;
+    const timestamp = args['timestamp'] as bigint;
+    const ancillaryData = args['ancillaryData'] as string;
+    const proposedPrice = args['proposedPrice'] as bigint;
+    const expirationTimestamp = args['expirationTimestamp'] as bigint;
+
+    const proposal: OracleProposal = {
+      proposalId: `${requester}_${timestamp.toString()}`,
+      marketId: this.extractMarketId(ancillaryData),
+      conditionId: identifier,
+      proposedOutcome: proposedPrice > 0n ? 'YES' : 'NO',
+      bondAmount: 0n,
+      proposalTimestamp: Number(timestamp),
+      expiryTimestamp: Number(expirationTimestamp),
+      status: 'PENDING',
+      blockNumber: log.blockNumber,
+    };
+
+    this.pendingProposals.set(proposal.proposalId, proposal);
+
+    BotWebSocketServer.getInstance().broadcast('ORACLE_PROPOSAL', proposal);
+    emitLog(
+      'INFO',
+      `[ResolutionSnipe] Oracle proposal: ${proposal.proposedOutcome} for ${proposal.marketId} expires in ${Math.round((proposal.expiryTimestamp - Date.now() / 1000) / 60)}min`,
+      undefined,
+      this.strategyId,
+    );
+  }
+
+  private handleSettle(log: ethers.EventLog | ethers.Log): void {
+    const args = (log as ethers.EventLog).args;
+    if (!args) return;
+
+    const proposalId = `${args['requester'] as string}_${(args['timestamp'] as bigint).toString()}`;
+    const proposal = this.pendingProposals.get(proposalId);
+    if (proposal) {
+      proposal.status = 'SETTLED';
+      this.pendingProposals.delete(proposalId);
+      emitLog('INFO', `[ResolutionSnipe] Oracle settled for ${proposal.marketId}`, undefined, this.strategyId);
+    }
   }
 
   private extractMarketId(ancillaryData: string): string {
