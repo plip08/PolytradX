@@ -47,7 +47,7 @@ const LTE_KEYWORDS = /\b(below|under|less than|fall below|drop to|dip below|bene
 const DATE_RE =
   /\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\.?\s*\d{0,2}(?:st|nd|rd|th)?(?:,?\s*\d{4})?|\bend of\b|\b20\d{2}\b|\bq[1-4]\b/gi;
 
-interface Classified {
+export interface Classified {
   market: MarketInfo;
   level: number;        // parsed $ / unit threshold
   deadline: number;     // expirationTimestamp
@@ -61,7 +61,7 @@ interface Classified {
  * market with a clear comparison direction and a real $ / unit level. Bare integers
  * (quarters "Q2", chart "#1", plain dates) are intentionally rejected to avoid mis-pairing.
  */
-function classifyMarket(m: MarketInfo): Classified | null {
+export function classifyMarket(m: MarketInfo): Classified | null {
   const question = m.question;
   const direction: 'GTE' | 'LTE' | null =
     GTE_KEYWORDS.test(question) ? 'GTE' : LTE_KEYWORDS.test(question) ? 'LTE' : null;
@@ -393,6 +393,11 @@ export class LogicArbStrategy {
       status: this.status,
       metrics: this.getMetrics(),
     });
+  }
+
+  /** Read-only view of the currently tracked pairs (for inspection / tests). */
+  getPairs(): readonly LogicPair[] {
+    return this.pairs;
   }
 
   getMetrics(): Record<string, number | string> {
