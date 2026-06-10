@@ -365,6 +365,12 @@ async function main(): Promise<void> {
         aiStrategy?.reloadApiKeys();
       }
 
+      // Apply DRY_RUN to the running strategies immediately (not just the .env file),
+      // so the dashboard toggle actually flips simulation vs live trading at runtime.
+      if ('DRY_RUN' in updates) {
+        runner.setDryRun(updates.DRY_RUN === 'true');
+      }
+
       // Update risk limits if they changed
       if ('MAX_GLOBAL_CAPITAL_USD' in updates) {
         risk.updateCapitalLimit();
