@@ -267,7 +267,7 @@ function KillSwitchConfig({
   config: BotConfig;
   onSave: (updates: Partial<BotConfig>) => Promise<void>;
 }): React.ReactElement {
-  const walletBalance = useBotStore((s) => s.walletBalanceUsdc);
+  const walletBalance = useBotStore((s) => s.botState?.walletBalanceUsdc ?? 0);
   const capitalUsd    = parseFloat(config.MAX_GLOBAL_CAPITAL_USD);
   const referenceAmt  = walletBalance > 0 ? walletBalance : capitalUsd;
 
